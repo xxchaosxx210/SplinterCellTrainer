@@ -45,7 +45,7 @@
 <Border Grid.Row="4" Background="#111813" BorderBrush="#263329" BorderThickness="1" CornerRadius="8" Padding="20,16">
     <Grid>
      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-     <DockPanel><TextBlock Text="TRAINER OPTIONS" Foreground="#C9D7C2" FontWeight="SemiBold" FontSize="12"/><TextBlock Text="MISSION CONTROLS" HorizontalAlignment="Right" Foreground="#82917C" FontSize="11"/></DockPanel>
+     <DockPanel><TextBlock Text="TRAINER OPTIONS" Foreground="#C9D7C2" FontWeight="SemiBold" FontSize="12"/><Button Content="NPC manager" Click="OpenNpcManager_Click" HorizontalAlignment="Right" Padding="10,5"/></DockPanel>
      <UniformGrid Grid.Row="1" Columns="2" Margin="0,12,0,12">
       <StackPanel><CheckBox x:Name="EnemyEspToggle" Content="Enemy ESP (through walls)" Checked="EnemyEsp_Checked" Unchecked="EnemyEsp_Unchecked"/><CheckBox x:Name="InfiniteHealthToggle" Content="Infinite health" Checked="InfiniteHealth_Changed" Unchecked="InfiniteHealth_Changed"/><CheckBox x:Name="UnlimitedAmmoToggle" Content="Unlimited ammunition" Checked="CheatOption_Changed" Unchecked="CheatOption_Changed" ToolTip="Refills reserve ammo for carried weapons; magazines still reload unless No reload is enabled."/><CheckBox x:Name="NoReloadToggle" Content="No reload" Checked="CheatOption_Changed" Unchecked="CheatOption_Changed" ToolTip="Keeps carried magazines full and prevents shots consuming ammunition."/></StackPanel>
       <StackPanel><CheckBox x:Name="UnlimitedGadgetsToggle" Content="Unlimited gadgets" Checked="CheatOption_Changed" Unchecked="CheatOption_Changed" ToolTip="Refills carried consumable gadgets and medkits. Does not grant missing items."/><CheckBox x:Name="ReducedDetectionToggle" Content="Reduced detection" Checked="CheatOption_Changed" Unchecked="CheatOption_Changed" ToolTip="Reduces hostile NPC sight distances to 25%. Hearing, cameras and scripted alerts remain active."/><CheckBox x:Name="MovementSpeedToggle" Content="Movement speed" Checked="CheatOption_Changed" Unchecked="CheatOption_Changed"/>
@@ -54,8 +54,8 @@
 </ComboBox></StackPanel>
      </UniformGrid>
      <StackPanel Grid.Row="2"><TextBlock x:Name="CheatStatus" Text="Additional cheats are off." Foreground="#B5EF65" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,6"/><TextBlock x:Name="EspStatus" Grid.Row="2" Text="Enemy ESP is off. Enable it, then focus the game window." Foreground="#8E9D89" FontSize="12" TextWrapping="Wrap"/>
-<WrapPanel Margin="0,12,0,6"><Button x:Name="SpawnGuardButton" Content="Spawn nearby guard" Click="SpawnGuard_Click" Margin="0,0,8,6"/><Button x:Name="RemoveGuardButton" Content="Remove spawned guard" Click="RemoveGuard_Click" Margin="0,0,0,6"/></WrapPanel>
-<TextBlock x:Name="SpawnStatus" Text="NPC spawning prototype: one hostile guard at a time. Use an open area." Foreground="#94A192" FontSize="12" TextWrapping="Wrap"/></StackPanel>
+<WrapPanel Margin="0,12,0,6"><Button Content="Open NPC manager" Click="OpenNpcManager_Click"/></WrapPanel>
+<TextBlock Text="Track up to eight spawned guards with live condition, activity and individual controls." Foreground="#94A192" FontSize="12" TextWrapping="Wrap"/></StackPanel>
     </Grid>
    </Border>
   </Grid>

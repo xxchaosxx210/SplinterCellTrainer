@@ -2,7 +2,7 @@
 
 Windows trainer for the original Tom Clancy's Splinter Cell on Steam, built with C# / WPF and a 32-bit C++ game-thread helper.
 
-**Trainer:** v0.6.2 prototype
+**Trainer:** v0.7.0 prototype
 **Supported Steam build:** 252083 (App ID 13560)
 
 ## Features
@@ -58,7 +58,7 @@ Run:
 
 Native/build.cmd currently uses the installed Visual Studio Community path; adjust it for a different installation. Native output is copied beside the managed application. Successful launcher build output is saved in bin/launcher-build.log; failures display that log.
 
-Both components check the native helper version and protocol (9). Engine/Core/WinDrv SHA-256 checks reject unrecognised binaries. The helper discovers gameplay-property offsets through reflection metadata. Alternative releases and mods are not generally supported by these checks.
+Both components check the native helper version and protocol (10). Engine/Core/WinDrv SHA-256 checks reject unrecognised binaries. The helper discovers gameplay-property offsets through reflection metadata. Alternative releases and mods are not generally supported by these checks.
 
 ## Validation
 
@@ -124,3 +124,42 @@ Live checks passed on 1_1_2Tbilisi: quicksave before spawning, quicksave with th
 guard alive, and quicksave after removal. The post-removal quickload returned to
 gameplay without a GPF. These checks cover this map and guard class; other missions
 and existing saves created by older removal code have not been validated.
+
+## NPC manager (v0.7.0)
+
+Open NPC manager from the trainer options panel. Spawn repeatedly to create up to
+eight present trainer NPCs. Each has a monotonic session ID, an individually
+selectable roster entry, and a panel showing health, weapon, distance, condition,
+movement, AI activity, raw pawn/controller states and the current firing target.
+The list refreshes every 750 ms without switching game focus. Editing or spawning
+focuses the game before making a change.
+
+Condition distinguishes Alive, Knocked out, Dead, Incapacitated (unknown zero-health
+state), Removing and Removed. Unconscious/death labels use actual engine state
+names, not health alone. Walking/running uses horizontal velocity and the native
+BaseMoveFlags animation enum; unrecognised moving modes say Moving. Activity
+includes Idle, Searching, Alerted, Stunned, Grabbed, Carried and Climbing. Other
+states remain visible by their raw names; Alerted is not assumed to mean shooting.
+
+Rename changes only the display name in the current manager window. Set health
+(1–100) and Restore health affect only a living, conscious selected NPC. They do
+not revive corpses or knocked-out actors. Remove selected NPC preserves the v0.6.2
+AI-group/patrol cleanup and waits for that specific actor to disappear. Freeze,
+forced combat and revival controls are not implemented.
+
+The helper keeps up to 32 recent records, reusing the oldest absent slot when
+needed. Identity checks include pointer, object-table index, name and level. Map
+changes, reloads and destroyed actors invalidate old pointers before any action.
+Tracking covers trainer-created actors in the current game process; it does not
+rediscover actors from save files. Names are not persisted. Closing the manager
+leaves spawned NPCs in the game and stops polling; reopening reconnects to the
+process registry.
+
+Validation: two simultaneous Georgian cops on 1_1_2Tbilisi had independent IDs,
+weapons and state snapshots. Setting NPC 2 to 68 HP left NPC 1 at 100; targeted
+removal of NPC 2 left NPC 1 present. A quicksave with one present and one removed
+completed without a GPF. Removing the remaining guard, saving again and quickloading
+also completed without a GPF. Knockout/death and movement classification have regression
+coverage; their combat transitions still need live gameplay verification.
+
+    dotnet run --project Tests\Npcs\Npcs.csproj

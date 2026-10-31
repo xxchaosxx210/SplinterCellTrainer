@@ -1,11 +1,12 @@
 #include <windows.h>
 #include <cstdio>
 #include <cwchar>
+#include "NpcProtocol.h"
 
 struct Request { DWORD version; DWORD pid; HWND window; LONG result; wchar_t map[128]; };
-static constexpr DWORD Version = 9;
-static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v9";
-static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v9.%lu", pid); }
+static constexpr DWORD Version = 10;
+static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v10";
+static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v10.%lu", pid); }
 
 #ifdef BRIDGE_DLL
 #include "Cheats.h"
@@ -181,7 +182,7 @@ static BOOL CALLBACK FindWindow(HWND window, LPARAM context) {
     return TRUE;
 }
 int wmain(int argc, wchar_t** argv) {
-    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.6.2:protocol9"); return 0; }
+    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.7.0:protocol10"); return 0; }
     if (argc != 3) { puts("Expected process ID and map."); return 2; }
     Search search = { wcstoul(argv[1], nullptr, 10), nullptr };
     EnumWindows(FindWindow, reinterpret_cast<LPARAM>(&search));
@@ -199,6 +200,15 @@ int wmain(int argc, wchar_t** argv) {
     if (!request) return 4;
     ZeroMemory(request, sizeof(Request)); request->version = Version; request->pid = search.pid; request->window = search.window;
     if (wcsncpy_s(request->map, argv[2], _TRUNCATE) != 0) return 4;
+    HANDLE npcMapping=nullptr;
+    NpcSnapshot* npcData=nullptr;
+    if(!wcscmp(argv[2],L"--npc-list")) {
+        wchar_t key[96];NpcSnapshotName(key,search.pid);
+        npcMapping=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,sizeof(NpcSnapshot),key);
+        if(!npcMapping||GetLastError()==ERROR_ALREADY_EXISTS){puts("NPC snapshot busy.");return 4;}
+        npcData=static_cast<NpcSnapshot*>(MapViewOfFile(npcMapping,FILE_MAP_ALL_ACCESS,0,0,sizeof(NpcSnapshot)));
+        if(!npcData){CloseHandle(npcMapping);return 4;}
+    }
     auto thread = GetWindowThreadProcessId(search.window, nullptr);
     auto hook = SetWindowsHookExW(WH_CALLWNDPROC, proc, dll, thread);
     if (!hook) { printf("Could not connect to game thread (Windows error %lu).\n", GetLastError()); return 5; }
@@ -209,16 +219,30 @@ int wmain(int argc, wchar_t** argv) {
     wchar_t requestMap[128]; wcsncpy_s(requestMap, request->map, _TRUNCATE);
     UnmapViewOfFile(request); CloseHandle(mapping); FreeLibrary(dll);
     if (!sent) { puts("Game did not respond; map load not confirmed. Do not retry until responsive."); return 6; }
+    if(npcData) {
+        bool valid=sent&&result==32&&npcData->version==1&&npcData->count<=32;
+        if(valid) {
+            puts("NPCS:1");
+            for(DWORD i=0;i<npcData->count;++i) {
+                auto& n=npcData->entries[i];
+                wprintf(L"%lu|%lu|%lu|%lu|%lu|%d|%.2f|%.2f|%s|%s|%s|%s|%s\n",n.id,n.present,n.removing,n.controller,n.moveFlags,n.health,n.speed,n.distance,n.type,n.pawnState,n.aiState,n.weapon,n.target);
+            }
+        }
+        UnmapViewOfFile(npcData);CloseHandle(npcMapping);
+        if(valid)return 0;
+    }
     switch (result) {
     case 1: puts("Map travel queued on the game thread."); return 0;
     case 11: wprintf(L"STATE:%s\n", requestMap); return 0;
     case 12: puts("STATE:loading"); return 0;
+    case 33: puts("Health editing is only available for living conscious NPCs; this does not revive an NPC."); return 17;
+    case 34: puts("NPC health updated."); return 0;
     case 30: puts("AI-group cleanup did not complete; actor removal was not scheduled."); return 16;
     case 28: puts("Spawned guard removal scheduled."); return 0;
     case 29: wprintf(L"NPC:%s\n",requestMap); return 0;
     case 21: wprintf(L"SPAWN:%s\n",requestMap); return 0;
     case 22: puts("Spawned guard removed (or no longer present)."); return 0;
-    case 23: puts("Remove the previous spawned guard before creating another."); return 12;
+    case 23: puts("The limit of eight active trainer NPCs has been reached."); return 12;
     case 24: puts("No ordinary armed guard type is available in this map."); return 13;
     case 25: puts("No clear spawn position in front of Sam. Move into an open area."); return 14;
     case 26: puts("Guard AI setup failed; created actors were removed."); return 15;

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net7.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>SCTrainer</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="Assets\splinter-cell-header.jpg" />
+  </ItemGroup>
+<ItemGroup><Content Include="Native\out\SCTravelHost.exe" CopyToOutputDirectory="PreserveNewest"/><Content Include="Native\out\SCTravelBridge.dll" CopyToOutputDirectory="PreserveNewest" Link="SCTravelBridge.dll" TargetPath="SCTravelBridge.dll"/><Content Update="Native\out\SCTravelHost.exe" Link="SCTravelHost.exe" TargetPath="SCTravelHost.exe"/></ItemGroup></Project>

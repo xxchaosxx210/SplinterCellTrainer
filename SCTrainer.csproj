@@ -6,8 +6,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>SCTrainer</AssemblyName>
+    <Version>0.5.0</Version>
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="Assets\splinter-cell-header.jpg" />
   </ItemGroup>
-<ItemGroup><Content Include="Native\out\SCTravelHost.exe" CopyToOutputDirectory="PreserveNewest"/><Content Include="Native\out\SCTravelBridge.dll" CopyToOutputDirectory="PreserveNewest" Link="SCTravelBridge.dll" TargetPath="SCTravelBridge.dll"/><Content Update="Native\out\SCTravelHost.exe" Link="SCTravelHost.exe" TargetPath="SCTravelHost.exe"/></ItemGroup></Project>
+<ItemGroup><Content Include="Native\out\SCTravelHost.exe" CopyToOutputDirectory="PreserveNewest"/><Content Include="Native\out\SCTravelBridge.dll" CopyToOutputDirectory="PreserveNewest" Link="SCTravelBridge.dll" TargetPath="SCTravelBridge.dll"/><Content Update="Native\out\SCTravelHost.exe" Link="SCTravelHost.exe" TargetPath="SCTravelHost.exe"/></ItemGroup><ItemGroup><Compile Remove="Tests\**\*.cs"/></ItemGroup></Project>

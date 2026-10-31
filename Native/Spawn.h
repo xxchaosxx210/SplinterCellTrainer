@@ -77,7 +77,27 @@ static bool Process(Request* r,void* view,HMODULE core,HMODULE engine,DWORD* obj
         DWORD lifeSpan=Property(objects,name,L"Actor",L"LifeSpan");
         if(!lifeSpan){r->result=3;return true;}
         // Do not call DestroyActor from the window hook. Expire the pawn during the
-        // engine's normal actor tick; Pawn.Destroyed -> Controller.PawnDied handles AI cleanup.
+        // engine's normal actor tick. First perform the game's normal AI death cleanup;
+        // generic Pawn.Destroyed alone skips AI-group, goal and patrol references.
+        auto ctrl=record->controller;
+        if(TrainerCheats::Alive(ctrl,record->controllerIndex) && !(U(ctrl,0x2c)&0x10)) {
+            auto goState=reinterpret_cast<int (__thiscall*)(void*,DWORD)>(GetProcAddress(core,"?GotoState@UObject@@UAE?AW4EGotoState@@VFName@@@Z"));
+            DWORD deadState=0,removePatrolName=0;
+            for(DWORD i=0;i<count;++i) {
+                auto obj=table[i];if(!obj)continue;
+                if(!wcscmp(name(obj),L"s_Dead"))deadState=U(obj,0x20);
+                if(!wcscmp(name(obj),L"RemoveReferencesInPatrolInfo"))removePatrolName=U(obj,0x20);
+            }
+            DWORD health=Property(objects,name,L"Pawn",L"Health");
+            DWORD group=Property(objects,name,L"EAIController",L"Group");
+            if(!goState||!deadState||!removePatrolName||!health||!group){r->result=3;return true;}
+            auto removePatrol=find(ctrl,removePatrolName,0);
+            if(!removePatrol){r->result=3;return true;}
+            *reinterpret_cast<int*>(record->pawn+health)=0;
+            goState(ctrl,deadState);
+            process(ctrl,removePatrol,nullptr,nullptr);
+            if(U(ctrl,group)!=0){r->result=30;return true;}
+        }
         *reinterpret_cast<float*>(record->pawn+lifeSpan)=0.1f;
         r->result=28;return true;
     }

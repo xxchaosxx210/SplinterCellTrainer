@@ -2,7 +2,7 @@
 
 Windows trainer for the original Tom Clancy's Splinter Cell on Steam, built with C# / WPF and a 32-bit C++ game-thread helper.
 
-**Trainer:** v0.5.0
+**Trainer:** v0.6.1 prototype
 **Supported Steam build:** 252083 (App ID 13560)
 
 ## Features
@@ -28,7 +28,7 @@ The five additional options run on a renewable session. If the trainer stops ren
 2. Double-click **Launch Trainer.cmd**. It builds matching native and C# components, then starts the trainer.
 3. Load a mission before enabling cheats. Focus the game to display ESP markers.
 
-The launcher builds each run into a fresh folder under bin/Runs/v0.5.0-*. This avoids overwriting a helper DLL retained by a running game. Use Launch Trainer.cmd --build-only to print the compiled executable path without opening it.
+The launcher builds each run into a fresh folder under bin/Runs/v0.6.1-*. This avoids overwriting a helper DLL retained by a running game. Use Launch Trainer.cmd --build-only to print the compiled executable path without opening it.
 
 The default game folder is:
 
@@ -58,7 +58,7 @@ Run:
 
 Native/build.cmd currently uses the installed Visual Studio Community path; adjust it for a different installation. Native output is copied beside the managed application. Successful launcher build output is saved in bin/launcher-build.log; failures display that log.
 
-Both components check the native helper version and protocol (6). Engine/Core/WinDrv SHA-256 checks reject unrecognised binaries. The helper discovers gameplay-property offsets through reflection metadata. Alternative releases and mods are not generally supported by these checks.
+Both components check the native helper version and protocol (8). Engine/Core/WinDrv SHA-256 checks reject unrecognised binaries. The helper discovers gameplay-property offsets through reflection metadata. Alternative releases and mods are not generally supported by these checks.
 
 ## Validation
 
@@ -82,3 +82,33 @@ Official Steam store header for Splinter Cell (app 13560), used as the trainer b
 https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/13560/header.jpg?t=1764775959
 
 Artwork belongs to its respective owners.
+
+## NPC spawning prototype (v0.6.0)
+
+Spawn nearby guard selects the nearest living armed EAIProfessional in the current
+map as a source of already-loaded pawn, controller and weapon classes. It creates
+a fresh pawn rather than copying the existing NPC's runtime pointers. Normal spawn
+collision checks remain enabled. Placement tries two short distances in front of
+Sam, with small side offsets if the centre is obstructed.
+
+Gameplay-spawned pawns are not automatically possessed in this game. The prototype
+creates the loaded controller class, supplies an initial weapon class through an
+engine-allocated reflected array, and invokes normal controller possession.
+It does not copy the source guard's mission tags or patrol assignments.
+
+Only one prototype guard may exist at a time. Remove spawned guard removes that
+pawn and its controller. Changing maps also discards the prototype's old references.
+Spawned actors may affect combat and saved mission state; use a test save.
+
+Live verification passed in Tbilisi: a Georgian cop spawned with 100 health, an EAIController, reciprocal possession links and a Makarov pistol. The user confirmed normal reactions. The one-guard cap and removal passed across separate build folders. The test guard was removed afterward. Other maps and guard classes still need testing.
+### Removal correction (v0.6.1)
+
+A user reproduced a GPF with the initial immediate-removal path. That path called
+DestroyActor on the pawn and then its controller, even though Pawn.Destroyed already
+calls Controller.PawnDied, which destroys an AI controller. Immediate removal is no
+longer used by the Remove button. Both spawning and removal now focus the game first.
+
+Remove sets Actor.LifeSpan to 0.1 seconds and lets the normal engine tick destroy
+the pawn and execute its built-in controller cleanup. The trainer waits up to five
+seconds to confirm that the tracked pawn is gone before reporting removal. This
+correction passed a live test: the user confirmed the guard disappeared after gameplay resumed. Both the pawn and AI controller were verified as pending deletion, and the game remained responsive. If the game is paused, expiry remains scheduled until normal ticking resumes.

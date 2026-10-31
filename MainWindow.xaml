@@ -53,7 +53,9 @@
  <ComboBoxItem Content="0.5x" Tag="50"/><ComboBoxItem Content="1x (normal)" Tag="100"/><ComboBoxItem Content="1.5x" Tag="150"/><ComboBoxItem Content="2x" Tag="200"/><ComboBoxItem Content="3x" Tag="300"/>
 </ComboBox></StackPanel>
      </UniformGrid>
-     <StackPanel Grid.Row="2"><TextBlock x:Name="CheatStatus" Text="Additional cheats are off." Foreground="#B5EF65" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,6"/><TextBlock x:Name="EspStatus" Grid.Row="2" Text="Enemy ESP is off. Enable it, then focus the game window." Foreground="#8E9D89" FontSize="12" TextWrapping="Wrap"/></StackPanel>
+     <StackPanel Grid.Row="2"><TextBlock x:Name="CheatStatus" Text="Additional cheats are off." Foreground="#B5EF65" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,6"/><TextBlock x:Name="EspStatus" Grid.Row="2" Text="Enemy ESP is off. Enable it, then focus the game window." Foreground="#8E9D89" FontSize="12" TextWrapping="Wrap"/>
+<WrapPanel Margin="0,12,0,6"><Button x:Name="SpawnGuardButton" Content="Spawn nearby guard" Click="SpawnGuard_Click" Margin="0,0,8,6"/><Button x:Name="RemoveGuardButton" Content="Remove spawned guard" Click="RemoveGuard_Click" Margin="0,0,0,6"/></WrapPanel>
+<TextBlock x:Name="SpawnStatus" Text="NPC spawning prototype: one hostile guard at a time. Use an open area." Foreground="#94A192" FontSize="12" TextWrapping="Wrap"/></StackPanel>
     </Grid>
    </Border>
   </Grid>

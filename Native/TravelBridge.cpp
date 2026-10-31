@@ -3,12 +3,13 @@
 #include <cwchar>
 
 struct Request { DWORD version; DWORD pid; HWND window; LONG result; wchar_t map[128]; };
-static constexpr DWORD Version = 6;
-static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v6";
-static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v6.%lu", pid); }
+static constexpr DWORD Version = 8;
+static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v8";
+static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v8.%lu", pid); }
 
 #ifdef BRIDGE_DLL
 #include "Cheats.h"
+#include "Spawn.h"
 #ifdef SC_TRAVEL_DIAGNOSTICS
 static wchar_t faultPath[MAX_PATH];
 static LONG faultCount = 0;
@@ -91,6 +92,7 @@ static void Handle(Request* r) {
             return;
         }
         if (TrainerCheats::SafeRequest(r, viewport, core, objects)) return;
+        if (TrainerSpawn::SafeRequest(r, viewport, core, engine, objects)) return;
         if (!wcscmp(r->map, L"--health-on") || !wcscmp(r->map, L"--health-off")) {
             bool enable = !wcscmp(r->map, L"--health-on");
             auto getName = reinterpret_cast<const wchar_t* (__thiscall*)(void*)>(GetProcAddress(core, "?GetName@UObject@@QBEPBGXZ"));
@@ -179,7 +181,7 @@ static BOOL CALLBACK FindWindow(HWND window, LPARAM context) {
     return TRUE;
 }
 int wmain(int argc, wchar_t** argv) {
-    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.5.0:protocol6"); return 0; }
+    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.6.1:protocol8"); return 0; }
     if (argc != 3) { puts("Expected process ID and map."); return 2; }
     Search search = { wcstoul(argv[1], nullptr, 10), nullptr };
     EnumWindows(FindWindow, reinterpret_cast<LPARAM>(&search));
@@ -211,6 +213,14 @@ int wmain(int argc, wchar_t** argv) {
     case 1: puts("Map travel queued on the game thread."); return 0;
     case 11: wprintf(L"STATE:%s\n", requestMap); return 0;
     case 12: puts("STATE:loading"); return 0;
+    case 28: puts("Spawned guard removal scheduled."); return 0;
+    case 29: wprintf(L"NPC:%s\n",requestMap); return 0;
+    case 21: wprintf(L"SPAWN:%s\n",requestMap); return 0;
+    case 22: puts("Spawned guard removed (or no longer present)."); return 0;
+    case 23: puts("Remove the previous spawned guard before creating another."); return 12;
+    case 24: puts("No ordinary armed guard type is available in this map."); return 13;
+    case 25: puts("No clear spawn position in front of Sam. Move into an open area."); return 14;
+    case 26: puts("Guard AI setup failed; created actors were removed."); return 15;
     case 18: wprintf(L"CHEATS:%s\n", requestMap); return 0;
     case 17: puts("Cheat session ended. Enable options again in the current mission."); return 11;
     case 15: wprintf(L"HEALTH:%s\n", requestMap); return 0;

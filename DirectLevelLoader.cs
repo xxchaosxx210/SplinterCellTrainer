@@ -26,7 +26,7 @@ internal static class DirectLevelLoader
         {
             ValidateGame(game);
             var version = await RunHelperAsync("--version");
-            if (version != "SCTravelHost:0.5.0:protocol6")
+            if (version != "SCTravelHost:0.6.1:protocol8")
                 throw new InvalidOperationException("Loader version mismatch. Close the trainer and use Launch Trainer.cmd.");
             if (map == "--probe") return await RunHelperAsync(game.Id.ToString(), map);
             var state = await RunHelperAsync(game.Id.ToString(), "--state");
@@ -60,7 +60,7 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if (await RunHelperAsync("--version") != "SCTravelHost:0.5.0:protocol6")
+            if (await RunHelperAsync("--version") != "SCTravelHost:0.6.1:protocol8")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             return await RunHelperAsync(game.Id.ToString(), enabled ? "--health-on" : "--health-off");
         }
@@ -76,9 +76,33 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if(await RunHelperAsync("--version")!="SCTravelHost:0.5.0:protocol6")
+            if(await RunHelperAsync("--version")!="SCTravelHost:0.6.1:protocol8")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             return await RunHelperAsync(game.Id.ToString(),command);
+        }
+        finally{Requests.Release();}
+    }
+
+    internal static async Task<string> SpawnNpcAsync(Process game,bool remove)
+    {
+        if(!await Requests.WaitAsync(0))throw new InvalidOperationException("Wait for the current trainer request to finish.");
+        try
+        {
+            ValidateGame(game);
+            if(await RunHelperAsync("--version")!="SCTravelHost:0.6.1:protocol8")
+                throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
+            await GameWindowFocus.PrepareAsync(game.MainWindowHandle);
+            var reply=await RunHelperAsync(game.Id.ToString(),remove?"--npc-remove":"--npc-spawn");
+            if(!remove)return reply;
+            for(int attempt=0;attempt<25;++attempt)
+            {
+                await Task.Delay(200);
+                game.Refresh();
+                if(game.HasExited || game.MainWindowTitle.Contains("Critical Error",StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("The game stopped during removal.");
+                if(await RunHelperAsync(game.Id.ToString(),"--npc-status")=="NPC:none")return "Spawned guard removed.";
+            }
+            throw new InvalidOperationException("Removal was scheduled but not confirmed. Leave the game focused and unpaused.");
         }
         finally{Requests.Release();}
     }

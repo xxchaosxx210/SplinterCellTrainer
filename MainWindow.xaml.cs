@@ -238,22 +238,14 @@ public partial class MainWindow : Window
     }
 
 
-    private async void SpawnGuard_Click(object sender,RoutedEventArgs e) => await SpawnGuardAsync(false);
-    private async void RemoveGuard_Click(object sender,RoutedEventArgs e) => await SpawnGuardAsync(true);
-
-    private async Task SpawnGuardAsync(bool remove)
+    private NpcManagerWindow? _npcManager;
+    private void OpenNpcManager_Click(object sender,RoutedEventArgs e)
     {
-        SpawnGuardButton.IsEnabled=RemoveGuardButton.IsEnabled=false;
-        var games=Process.GetProcessesByName("SplinterCell");
-        try
-        {
-            if(games.Length!=1)throw new InvalidOperationException("Start one game and load a mission first.");
-            SpawnStatus.Text=remove?"Removing spawned guard…":"Spawning one guard…";
-            SpawnStatus.Text=await DirectLevelLoader.SpawnNpcAsync(games[0],remove);
-        }
-        catch(Exception ex) when(ex is InvalidOperationException or System.ComponentModel.Win32Exception or System.IO.IOException or UnauthorizedAccessException)
-        {SpawnStatus.Text=ex.Message;}
-        finally{foreach(var game in games)game.Dispose();SpawnGuardButton.IsEnabled=RemoveGuardButton.IsEnabled=true;}
+        if(_npcManager is null) {
+            _npcManager=new NpcManagerWindow {Owner=this};
+            _npcManager.Closed+=(_,_)=>_npcManager=null;
+            _npcManager.Show();
+        } else _npcManager.Activate();
     }
 
     private const string GameDirectory = @"C:\Program Files (x86)\Steam\steamapps\common\Splinter Cell";

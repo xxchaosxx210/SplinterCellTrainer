@@ -26,7 +26,7 @@ internal static class DirectLevelLoader
         {
             ValidateGame(game);
             var version = await RunHelperAsync("--version");
-            if (version != "SCTravelHost:0.6.2:protocol9")
+            if (version != "SCTravelHost:0.7.0:protocol10")
                 throw new InvalidOperationException("Loader version mismatch. Close the trainer and use Launch Trainer.cmd.");
             if (map == "--probe") return await RunHelperAsync(game.Id.ToString(), map);
             var state = await RunHelperAsync(game.Id.ToString(), "--state");
@@ -60,7 +60,7 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if (await RunHelperAsync("--version") != "SCTravelHost:0.6.2:protocol9")
+            if (await RunHelperAsync("--version") != "SCTravelHost:0.7.0:protocol10")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             return await RunHelperAsync(game.Id.ToString(), enabled ? "--health-on" : "--health-off");
         }
@@ -76,33 +76,46 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if(await RunHelperAsync("--version")!="SCTravelHost:0.6.2:protocol9")
+            if(await RunHelperAsync("--version")!="SCTravelHost:0.7.0:protocol10")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             return await RunHelperAsync(game.Id.ToString(),command);
         }
         finally{Requests.Release();}
     }
 
-    internal static async Task<string> SpawnNpcAsync(Process game,bool remove)
+    internal static async Task<NpcSnapshot[]?> ReadNpcsAsync(Process game)
     {
-        if(!await Requests.WaitAsync(0))throw new InvalidOperationException("Wait for the current trainer request to finish.");
+        if(!await Requests.WaitAsync(0))return null;
+        try { return NpcSnapshot.Parse(await RunHelperAsync(game.Id.ToString(),"--npc-list")); }
+        finally { Requests.Release(); }
+    }
+
+    internal static async Task<string> NpcActionAsync(Process game,string action,uint id=0,int health=100)
+    {
+        string command=action switch {
+            "spawn"=>"--npc-spawn",
+            "remove" when id>0=>$"--npc-remove:{id}",
+            "health" when id>0 && health is >=1 and <=100=>$"--npc-health:{id}:{health}",
+            _=>throw new ArgumentException("Invalid NPC action.")
+        };
+        await Requests.WaitAsync();
         try
         {
             ValidateGame(game);
-            if(await RunHelperAsync("--version")!="SCTravelHost:0.6.2:protocol9")
+            if(await RunHelperAsync("--version")!="SCTravelHost:0.7.0:protocol10")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             await GameWindowFocus.PrepareAsync(game.MainWindowHandle);
-            var reply=await RunHelperAsync(game.Id.ToString(),remove?"--npc-remove":"--npc-spawn");
-            if(!remove)return reply;
+            var reply=await RunHelperAsync(game.Id.ToString(),command);
+            if(action!="remove")return reply;
             for(int attempt=0;attempt<25;++attempt)
             {
-                await Task.Delay(200);
-                game.Refresh();
+                await Task.Delay(200);game.Refresh();
                 if(game.HasExited || game.MainWindowTitle.Contains("Critical Error",StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException("The game stopped during removal.");
-                if(await RunHelperAsync(game.Id.ToString(),"--npc-status")=="NPC:none")return "Spawned guard removed.";
+                var entries=NpcSnapshot.Parse(await RunHelperAsync(game.Id.ToString(),"--npc-list"));
+                if(!entries.Any(n=>n.Id==id&&n.Present))return $"NPC {id} removed.";
             }
-            throw new InvalidOperationException("Removal was scheduled but not confirmed. Leave the game focused and unpaused.");
+            throw new InvalidOperationException("Removal scheduled but not yet confirmed. Leave the game focused and unpaused.");
         }
         finally{Requests.Release();}
     }

@@ -3,9 +3,9 @@
 #include <cwchar>
 
 struct Request { DWORD version; DWORD pid; HWND window; LONG result; wchar_t map[128]; };
-static constexpr DWORD Version = 8;
-static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v8";
-static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v8.%lu", pid); }
+static constexpr DWORD Version = 9;
+static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v9";
+static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v9.%lu", pid); }
 
 #ifdef BRIDGE_DLL
 #include "Cheats.h"
@@ -181,7 +181,7 @@ static BOOL CALLBACK FindWindow(HWND window, LPARAM context) {
     return TRUE;
 }
 int wmain(int argc, wchar_t** argv) {
-    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.6.1:protocol8"); return 0; }
+    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.6.2:protocol9"); return 0; }
     if (argc != 3) { puts("Expected process ID and map."); return 2; }
     Search search = { wcstoul(argv[1], nullptr, 10), nullptr };
     EnumWindows(FindWindow, reinterpret_cast<LPARAM>(&search));
@@ -213,6 +213,7 @@ int wmain(int argc, wchar_t** argv) {
     case 1: puts("Map travel queued on the game thread."); return 0;
     case 11: wprintf(L"STATE:%s\n", requestMap); return 0;
     case 12: puts("STATE:loading"); return 0;
+    case 30: puts("AI-group cleanup did not complete; actor removal was not scheduled."); return 16;
     case 28: puts("Spawned guard removal scheduled."); return 0;
     case 29: wprintf(L"NPC:%s\n",requestMap); return 0;
     case 21: wprintf(L"SPAWN:%s\n",requestMap); return 0;

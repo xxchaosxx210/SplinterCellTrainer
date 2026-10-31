@@ -2,7 +2,7 @@
 
 Windows trainer for the original Tom Clancy's Splinter Cell on Steam, built with C# / WPF and a 32-bit C++ game-thread helper.
 
-**Trainer:** v0.6.1 prototype
+**Trainer:** v0.6.2 prototype
 **Supported Steam build:** 252083 (App ID 13560)
 
 ## Features
@@ -58,7 +58,7 @@ Run:
 
 Native/build.cmd currently uses the installed Visual Studio Community path; adjust it for a different installation. Native output is copied beside the managed application. Successful launcher build output is saved in bin/launcher-build.log; failures display that log.
 
-Both components check the native helper version and protocol (8). Engine/Core/WinDrv SHA-256 checks reject unrecognised binaries. The helper discovers gameplay-property offsets through reflection metadata. Alternative releases and mods are not generally supported by these checks.
+Both components check the native helper version and protocol (9). Engine/Core/WinDrv SHA-256 checks reject unrecognised binaries. The helper discovers gameplay-property offsets through reflection metadata. Alternative releases and mods are not generally supported by these checks.
 
 ## Validation
 
@@ -112,3 +112,15 @@ Remove sets Actor.LifeSpan to 0.1 seconds and lets the normal engine tick destro
 the pawn and execute its built-in controller cleanup. The trainer waits up to five
 seconds to confirm that the tracked pawn is gone before reporting removal. This
 correction passed a live test: the user confirmed the guard disappeared after gameplay resumed. Both the pawn and AI controller were verified as pending deletion, and the game remained responsive. If the game is paused, expiry remains scheduled until normal ticking resumes.
+
+### Save cleanup correction (v0.6.2)
+
+Generic pawn expiry did not run the AI death state's group and goal cleanup.
+Removal now puts the spawned controller into its normal s_Dead state and invokes
+RemoveReferencesInPatrolInfo before scheduling pawn expiry. The helper checks that
+the controller has left its AI group before proceeding.
+
+Live checks passed on 1_1_2Tbilisi: quicksave before spawning, quicksave with the
+guard alive, and quicksave after removal. The post-removal quickload returned to
+gameplay without a GPF. These checks cover this map and guard class; other missions
+and existing saves created by older removal code have not been validated.

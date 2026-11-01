@@ -6,7 +6,7 @@ Windows trainer for the original Tom Clancy's Splinter Cell on Steam, built with
 
 
 
-**Trainer:** v0.16.0 prototype
+**Trainer:** v0.17.0 prototype
 
 **Supported Steam build:** 252083 (App ID 13560)
 
@@ -405,7 +405,7 @@ and quickload returned to gameplay without a GPF. Regression checks also cover
 activity eligibility for normal versus unconscious/dead/removed/special states.
 
 
-## Map NPCs and position editing (v0.16.0)
+## Map NPCs and position editing (v0.17.0)
 
 The manager automatically discovers EAIPawn instances in the current loaded
 mission, including guards, civilians, bodies and scripted characters. Each row
@@ -476,7 +476,7 @@ Condition changes in the overlay return after the game accepts the request; they
 
 Overlay regression checks cover separate named map and spawned rosters, map-removal protection, browsing another NPC's condition submenu during an outstanding edit, preserving the original edit target, and returning directly from the map roster to the main menu.
 
-Live v0.16.0 verification in Tbilisi: the named map roster populated and keyboard navigation scrolled to its bottom; a map NPC editor opened with removal disabled. A temporary spawned guard was knocked out, revived through the overlay, and Back navigation was accepted after the revival request. The test guard was removed afterward; the game remained running without a GPF. No map NPC properties were changed during this verification.
+Live v0.17.0 verification in Tbilisi: the named map roster populated and keyboard navigation scrolled to its bottom; a map NPC editor opened with removal disabled. A temporary spawned guard was knocked out, revived through the overlay, and Back navigation was accepted after the revival request. The test guard was removed afterward; the game remained running without a GPF. No map NPC properties were changed during this verification.
 
 ## Overlay level loading (v0.15.0)
 
@@ -492,3 +492,15 @@ Live v0.16.0 verification in Tbilisi: the named map roster populated and keyboar
 For text fields, press Enter to edit, type the value, then Enter to apply or Escape to cancel. The initial value is selected so typing replaces it. Ctrl+A selects all; Left/Right, Home/End, Backspace and Delete edit the draft. Use a dot for decimal coordinates. F6 closes and cancels a draft; switching away from the game also cancels it. While editing, typing is consumed by the overlay instead of reaching gameplay. The trainer process must remain running to provide the overlay.
 
 Build and automated input/NPC regression checks are provided. New live keyboard-entry, utility, speed-selection and coordinate-editing checks are left for the user's requested gameplay test.
+
+## Tray application (v0.17.0)
+
+Launching the trainer now starts a background system-tray application, with no large trainer window. Start Splinter Cell through Steam in windowed mode and press **F6** for all game controls. If the tray icon is hidden, use the Windows tray overflow area. A grey icon means the game is not detected, green means detected, and orange means the overlay could not start.
+
+Right-click the tray icon for **Status**, **Restart overlay**, and **Exit**. Double-clicking the icon or launching the trainer again opens the compact Status window in the existing process. Closing or hiding Status keeps the trainer and overlay running. Restart overlay replaces its window and keyboard hook without disabling active cheats.
+
+Exit from the tray, Status or the overlay uses the same graceful cleanup: stop accepting overlay input, wait for an outstanding update, restore additional cheat settings and infinite health, then close the background controller and remove the tray icon. Splinter Cell stays running. If cleanup fails, the trainer remains available and opens Status so the problem can be reviewed and Exit retried.
+
+The former MainWindow is retained internally as a hidden control host for the existing cheat sessions; startup never shows it. The old NPC manager is no longer exposed by the tray UI. Application shutdown is explicit so hiding the Status window does not terminate the process.
+
+Verification: clean build; overlay/cheat regression checks; STA lifecycle checks for invisible controller startup, close-request routing, replacing only the overlay, and orderly shutdown/window cleanup. Desktop smoke checks confirmed no large startup window and second-launch activation of the compact Status window. The user confirmed the tray workflow works, including F6, hiding Status, restarting the overlay and exiting.

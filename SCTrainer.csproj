@@ -3,11 +3,13 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net7.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>SCTrainer</AssemblyName>
-    <Version>0.16.0</Version>
+    <Version>0.17.0</Version>
   </PropertyGroup>
+  <ItemGroup><Using Remove="System.Windows.Forms"/><Using Remove="System.Drawing"/></ItemGroup>
   <ItemGroup>
     <Resource Include="Assets\splinter-cell-header.jpg" />
   </ItemGroup>

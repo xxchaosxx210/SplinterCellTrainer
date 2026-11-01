@@ -22,7 +22,6 @@ public partial class MainWindow : Window
         Width = Math.Min(Width, MaxWidth);
         Height = Math.Min(Height, MaxHeight);
         Closing += Window_Closing;
-        Loaded += (_,_) => StartGameMenu();
         PopulateLevels();
         RefreshGameStatus();
         _timer.Tick += Timer_Tick;
@@ -30,7 +29,39 @@ public partial class MainWindow : Window
         Closed += (_, _) => { _gameMenu?.Close(); _overlayNpcs.Dispose(); _enemyOverlay?.Close(); _timer.Stop(); _timer.Tick -= Timer_Tick; };
     }
 
-    private void Close_Click(object sender, RoutedEventArgs e) => Close();
+    // The former window is a hidden control host during the tray migration; it is never shown.
+    public event Action? ExitRequested;
+    private bool _shutdownRunning,_shutdownApproved;
+    public bool IsBusy=>_levelLoading||_overlayNpcs.Busy||_overlayNpcs.Refreshing||_healthChanging||_cheatsChanging||_cheatRefreshBusy;
+    public void StartBackground()=>StartGameMenu();
+    internal TrainerStatusSnapshot Status=>new(GameStatus.Text,GameDetail.Text,MenuStatus.Text,CheatStatus.Text,HealthStatus.Text,LevelStatus.Text,
+        GameStatus.Text=="Game detected",MenuStatus.Text.StartsWith("In-game menu unavailable",StringComparison.Ordinal),_shutdownRunning);
+    public string RestartOverlay()
+    {
+        if(_shutdownRunning||IsBusy)return MenuStatus.Text="Wait for the current trainer update to finish.";
+        _gameMenu?.Close();_gameMenu=null;
+        _showOverlayLevels=false;_showOverlayNpcs=false;_utilityPage=null;
+        StartGameMenu();return MenuStatus.Text;
+    }
+    public async Task<bool> ShutdownTrainerAsync()
+    {
+        if(_shutdownRunning)return false;
+        _shutdownRunning=true;
+        _gameMenu?.Close();_gameMenu=null;
+        MenuStatus.Text="Stopping trainer and restoring active cheats…";
+        bool success=false;
+        try {
+            var waiting=Stopwatch.StartNew();
+            while(IsBusy){if(waiting.Elapsed>TimeSpan.FromSeconds(60)){MenuStatus.Text="An update is still running. Wait for it to finish, then retry Exit.";return false;}await Task.Delay(100);}
+            if(!await ApplyCheatSettingsAsync(new(CheatOptions.None))||!await SetInfiniteHealthAsync(false))return false;
+            _shutdownApproved=true;success=true;Close();return true;
+        }
+        finally {
+            if(!success){_shutdownRunning=false;StartGameMenu();}
+        }
+    }
+    private void RequestExit()=>ExitRequested?.Invoke();
+    private void Close_Click(object sender, RoutedEventArgs e) => RequestExit();
 
     private GameMenuOverlay? _gameMenu;
     private readonly NpcOverlayMenu _overlayNpcs=new();
@@ -41,6 +72,7 @@ public partial class MainWindow : Window
     private static readonly CheatOptions[] MenuOptions={CheatOptions.UnlimitedAmmo,CheatOptions.NoReload,CheatOptions.UnlimitedGadgets,CheatOptions.ReducedDetection,CheatOptions.MovementSpeed,CheatOptions.Invisibility,CheatOptions.Noclip};
     private void StartGameMenu()
     {
+        if(_gameMenu is not null)return;
         try {
             _overlayLevels=new LevelOverlayMenu(()=>_levels.Select(l=>new LevelMenuChoice(l.Map,l.Label)).ToArray(),LoadOverlayLevelAsync);
             _gameMenu=new GameMenuOverlay(ReadGameMenu,ToggleGameMenuAsync,()=>_showOverlayNpcs&&!_levelLoading?_overlayNpcs.RefreshAsync():Task.CompletedTask);
@@ -51,6 +83,7 @@ public partial class MainWindow : Window
     }
     private GameMenuFrame ReadGameMenu()
     {
+        if(_shutdownRunning)return new("stopping","TRAINER STOPPING",new[]{new GameMenuEntry("Restoring active cheats…",false,false,"stopping",null,false)});
         if(_utilityPage is not null)return ReadUtilityMenu();
         if(_showOverlayLevels&&_overlayLevels is not null)return _overlayLevels.Frame;
         if(_showOverlayNpcs)return _overlayNpcs.Frame;
@@ -136,7 +169,7 @@ public partial class MainWindow : Window
         if(_levelLoading||_overlayNpcs.Busy||_overlayNpcs.Refreshing||_healthChanging||_cheatsChanging||_cheatRefreshBusy)return "Please wait for the current update.";
         if(key=="exit-confirm"&&_utilityPage=="exit"){
             // Uses the existing close handler, which restores active cheat sessions first.
-            _ = Dispatcher.BeginInvoke(new Action(Close));return "Closing trainer…";
+            _ = Dispatcher.BeginInvoke(new Action(RequestExit));return "Closing trainer…";
         }
         if(key=="detect-refresh"){RefreshGameStatus();return GameStatus.Text+" / "+GameDetail.Text;}
         if(key=="connection-test"){
@@ -259,13 +292,10 @@ public partial class MainWindow : Window
         HealthStatus.Text = "Infinite health reset after the player changed. Enable it again in the new mission.";
     }
 
-    private async void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+    private void Window_Closing(object? sender,System.ComponentModel.CancelEventArgs e)
     {
-        if (_levelLoading || _overlayNpcs.Busy || _overlayNpcs.Refreshing || _healthChanging || _cheatsChanging || _cheatRefreshBusy) { e.Cancel=true; return; }
-        if (_healthSession is null && _cheatSession is null) return;
-        e.Cancel=true;
-        if (!await ApplyCheatSettingsAsync(new(CheatOptions.None)))return;
-        if (await SetInfiniteHealthAsync(false))Close();
+        if(_shutdownApproved)return;
+        e.Cancel=true;RequestExit();
     }
     private CheatSession? _cheatSession;
     private bool _cheatsChanging, _cheatRefreshBusy, _cheatControlsReady;

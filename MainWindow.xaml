@@ -55,7 +55,7 @@
      </UniformGrid>
      <StackPanel Grid.Row="2"><TextBlock x:Name="CheatStatus" Text="Additional cheats are off." Foreground="#B5EF65" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,6"/><TextBlock x:Name="EspStatus" Grid.Row="2" Text="Enemy ESP is off. Enable it, then focus the game window." Foreground="#8E9D89" FontSize="12" TextWrapping="Wrap"/>
 <WrapPanel Margin="0,12,0,6"><Button Content="Open NPC manager" Click="OpenNpcManager_Click"/></WrapPanel>
-<TextBlock Text="Track up to eight spawned guards with live condition, activity and individual controls." Foreground="#94A192" FontSize="12" TextWrapping="Wrap"/></StackPanel>
+<TextBlock Text="Inspect map NPCs and up to eight spawned guards. Edit condition, activity and position." Foreground="#94A192" FontSize="12" TextWrapping="Wrap"/></StackPanel>
     </Grid>
    </Border>
   </Grid>

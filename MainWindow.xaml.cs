@@ -69,7 +69,7 @@ public partial class MainWindow : Window
     private string? _utilityPage;
     private LevelOverlayMenu? _overlayLevels;
     private LevelChoice[] _levels=Array.Empty<LevelChoice>();
-    private static readonly CheatOptions[] MenuOptions={CheatOptions.UnlimitedAmmo,CheatOptions.NoReload,CheatOptions.UnlimitedGadgets,CheatOptions.ReducedDetection,CheatOptions.MovementSpeed,CheatOptions.Invisibility,CheatOptions.Noclip};
+    private static readonly CheatOptions[] MenuOptions={CheatOptions.UnlimitedAmmo,CheatOptions.NoReload,CheatOptions.UnlimitedGadgets,CheatOptions.ReducedDetection,CheatOptions.MovementSpeed,CheatOptions.Invisibility,CheatOptions.Noclip,CheatOptions.BypassLocks};
     private void StartGameMenu()
     {
         if(_gameMenu is not null)return;
@@ -93,7 +93,7 @@ public partial class MainWindow : Window
             new("Enemy ESP",EnemyEspToggle.IsChecked==true,ready,"cheat:0"),
             new("Infinite health",InfiniteHealthToggle.IsChecked==true,ready,"cheat:1")
         };
-        string[] labels={"Unlimited ammunition","No reload","Unlimited gadgets","Reduced detection",$"Movement speed ({settings.SpeedPercent/100.0:0.##}x)","Invisibility","Noclip (walls / doors)"};
+        string[] labels={"Unlimited ammunition","No reload","Unlimited gadgets","Reduced detection",$"Movement speed ({settings.SpeedPercent/100.0:0.##}x)","Invisibility","Noclip (walls / doors)","Bypass locks"};
         for(int i=0;i<MenuOptions.Length;++i){
             if(MenuOptions[i]==CheatOptions.MovementSpeed)items.Add(new("Movement speed",false,true,"speed-menu",settings.Options.HasFlag(CheatOptions.MovementSpeed)?$"{settings.SpeedPercent/100.0:0.##}x":"OFF",false,true));
             else items.Add(new(labels[i],settings.Options.HasFlag(MenuOptions[i]),ready,$"cheat:{i+2}"));
@@ -310,6 +310,7 @@ public partial class MainWindow : Window
         if(MovementSpeedToggle.IsChecked==true)options|=CheatOptions.MovementSpeed;
         if(InvisibilityToggle.IsChecked==true)options|=CheatOptions.Invisibility;
         if(NoclipToggle.IsChecked==true)options|=CheatOptions.Noclip;
+        if(BypassLocksToggle.IsChecked==true)options|=CheatOptions.BypassLocks;
         var selected=SpeedPicker.SelectedItem as System.Windows.Controls.ComboBoxItem;
         int speed=selected?.Tag is string value ? int.Parse(value,System.Globalization.CultureInfo.InvariantCulture) : 100;
         return new(options,speed);
@@ -318,7 +319,7 @@ public partial class MainWindow : Window
     private void SetCheatControls(bool available)
     {
         UnlimitedAmmoToggle.IsEnabled=NoReloadToggle.IsEnabled=UnlimitedGadgetsToggle.IsEnabled=
-            ReducedDetectionToggle.IsEnabled=MovementSpeedToggle.IsEnabled=InvisibilityToggle.IsEnabled=NoclipToggle.IsEnabled=available;
+            ReducedDetectionToggle.IsEnabled=MovementSpeedToggle.IsEnabled=InvisibilityToggle.IsEnabled=NoclipToggle.IsEnabled=BypassLocksToggle.IsEnabled=available;
         SpeedPicker.IsEnabled=available && MovementSpeedToggle.IsChecked==true;
     }
 
@@ -331,6 +332,7 @@ public partial class MainWindow : Window
         MovementSpeedToggle.IsChecked=settings.Options.HasFlag(CheatOptions.MovementSpeed);
         InvisibilityToggle.IsChecked=settings.Options.HasFlag(CheatOptions.Invisibility);
         NoclipToggle.IsChecked=settings.Options.HasFlag(CheatOptions.Noclip);
+        BypassLocksToggle.IsChecked=settings.Options.HasFlag(CheatOptions.BypassLocks);
         foreach(System.Windows.Controls.ComboBoxItem item in SpeedPicker.Items)
             if((string)item.Tag==settings.SpeedPercent.ToString(System.Globalization.CultureInfo.InvariantCulture))SpeedPicker.SelectedItem=item;
     }

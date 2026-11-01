@@ -15,8 +15,10 @@ catch(ArgumentOutOfRangeException){Console.WriteLine("PASS: out-of-range speed r
 Check(new CheatSettings(CheatOptions.Invisibility).Command=="--cheats:32:100","invisibility does not enable health or other cheats");
 Check(new CheatSettings(CheatOptions.Noclip).Command=="--cheats:64:100","noclip is independently selectable");
 Check(new CheatSettings(CheatOptions.Invisibility|CheatOptions.Noclip).Command=="--cheats:96:100","invisibility and noclip combine independently");
-try { new CheatSettings((CheatOptions)128).Validate();throw new Exception("Unknown option accepted"); }
+try { new CheatSettings((CheatOptions)256).Validate();throw new Exception("Unknown option accepted"); }
 catch(ArgumentOutOfRangeException){Console.WriteLine("PASS: unknown option rejected");}
+Check(new CheatSettings(CheatOptions.BypassLocks).Command=="--cheats:128:100","lock bypass is independently selectable");
+Check(new CheatSettings(CheatOptions.BypassLocks|CheatOptions.Invisibility).Command=="--cheats:160:100","lock bypass preserves independent visibility selection");
 if(!args.Contains("--live")){Console.WriteLine("Pass --live to test against one running mission.");return;}
 
 var games=Process.GetProcessesByName("SplinterCell");

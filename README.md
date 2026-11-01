@@ -6,7 +6,7 @@ Windows trainer for the original Tom Clancy's Splinter Cell on Steam, built with
 
 
 
-**Trainer:** v0.17.0 prototype
+**Trainer:** v0.18.0 prototype
 
 **Supported Steam build:** 252083 (App ID 13560)
 
@@ -405,7 +405,7 @@ and quickload returned to gameplay without a GPF. Regression checks also cover
 activity eligibility for normal versus unconscious/dead/removed/special states.
 
 
-## Map NPCs and position editing (v0.17.0)
+## Map NPCs and position editing (v0.18.0)
 
 The manager automatically discovers EAIPawn instances in the current loaded
 mission, including guards, civilians, bodies and scripted characters. Each row
@@ -476,7 +476,7 @@ Condition changes in the overlay return after the game accepts the request; they
 
 Overlay regression checks cover separate named map and spawned rosters, map-removal protection, browsing another NPC's condition submenu during an outstanding edit, preserving the original edit target, and returning directly from the map roster to the main menu.
 
-Live v0.17.0 verification in Tbilisi: the named map roster populated and keyboard navigation scrolled to its bottom; a map NPC editor opened with removal disabled. A temporary spawned guard was knocked out, revived through the overlay, and Back navigation was accepted after the revival request. The test guard was removed afterward; the game remained running without a GPF. No map NPC properties were changed during this verification.
+Live v0.18.0 verification in Tbilisi: the named map roster populated and keyboard navigation scrolled to its bottom; a map NPC editor opened with removal disabled. A temporary spawned guard was knocked out, revived through the overlay, and Back navigation was accepted after the revival request. The test guard was removed afterward; the game remained running without a GPF. No map NPC properties were changed during this verification.
 
 ## Overlay level loading (v0.15.0)
 
@@ -504,3 +504,15 @@ Exit from the tray, Status or the overlay uses the same graceful cleanup: stop a
 The former MainWindow is retained internally as a hidden control host for the existing cheat sessions; startup never shows it. The old NPC manager is no longer exposed by the tray UI. Application shutdown is explicit so hiding the Status window does not terminate the process.
 
 Verification: clean build; overlay/cheat regression checks; STA lifecycle checks for invisible controller startup, close-request routing, replacing only the overlay, and orderly shutdown/window cleanup. Desktop smoke checks confirmed no large startup window and second-launch activation of the compact Status window. The user confirmed the tray workflow works, including F6, hiding Status, restarting the overlay and exiting.
+
+## Bypass locks (v0.18.0)
+
+Enable **F6 → Bypass locks**, close the overlay, then use the game's normal interaction:
+
+- Nearby ordinary, usable, closed swinging doors with knob openers are temporarily treated as unlocked, so Open Door skips the lockpick minigame. Keypad/retinal opener doors, unusable doors and distant locks are excluded from this direct unlock path. Explicitly linked ordinary door leaves are handled together.
+- When Sam actually starts using a keypad, his active EKeyPadInteraction is checked before the keypad enters its existing s_AccessGranted state. The game's own code handles access feedback, mission events and linked-door unlocking. Codes are neither rewritten nor entered by the trainer, and NPC/idle keypad interactions are excluded. After access is granted, use the door normally.
+- Unused prepared locks are restored when disabling the toggle, leaving the area, losing the session heartbeat or exiting. Once normal door opening has begun, the unlock is committed instead of relocking completed progress. Enable before starting a lockpick interaction; an already-running pick minigame is not forcibly interrupted. Script-blocked doors remain blocked.
+
+Lock metadata is resolved separately when this option is enabled, so unsupported lock scripts do not prevent unrelated cheats. Native protocol 16 separates this helper from earlier pinned code. The normal interaction paths were researched using the primary [EDoorInteraction](https://github.com/Joshhhuaaa/EnhancedSC/blob/main/UnrealScript/EchelonIngredient/Classes/EDoorInteraction.uc), [ESwingingDoor](https://github.com/Joshhhuaaa/EnhancedSC/blob/main/UnrealScript/EchelonIngredient/Classes/ESwingingDoor.uc) and [EKeyPad](https://github.com/Joshhhuaaa/EnhancedSC/blob/main/UnrealScript/EchelonIngredient/Classes/EKeyPad.uc) sources and checked against loaded property metadata.
+
+Validation: clean native/WPF build, native policy checks for scope/restoration/player-owned keypad use, cheat-mask checks, overlay and tray regression checks. A live toggle smoke test in Tbilisi part 2 accepted the new flag and confirmed that the nearby keypad door remained locked and its access-code storage unchanged before interaction; the toggle was switched off afterward. Actual keypad success and ordinary lockpick-door interaction still require gameplay confirmation.

@@ -8,7 +8,7 @@ namespace TrainerCheats {
 using Byte = unsigned char;
 using NameFn = const wchar_t* (__thiscall*)(void*);
 struct Field { const wchar_t* owner; const wchar_t* name; const wchar_t* type; DWORD offset=0, mask=0; WORD count=0; };
-enum { Ammo=1, NoReload=2, Gadgets=4, Detection=8, Speed=16, Invisible=32, Noclip=64 };
+enum { Ammo=1, NoReload=2, Gadgets=4, Detection=8, Speed=16, Invisible=32, Noclip=64, BypassLocks=128 };
 static Field fields[] = {
     {L"EPlayerController",L"EPawn",L"ObjectProperty"},
     {L"EPawn",L"FullInventory",L"ObjectProperty"},
@@ -92,6 +92,10 @@ static void Resolve() {
         if(!wcscmp(f.type,L"BoolProperty") && (!f.mask || (f.mask&(f.mask-1))))throw 1;
     }
 }
+static void LockRestore();
+static void LockClear();
+static void LockResolve();
+static void LockTick();
 static bool ghostOwned=false;
 static bool Command(const wchar_t* command) {
     auto engine=GetModuleHandleW(L"Core.dll");
@@ -101,6 +105,7 @@ static bool Command(const wchar_t* command) {
     return log&&*log&&exec(target,command,*log)!=0;
 }
 static void Restore(DWORD groups) {
+    if(groups&BypassLocks)LockRestore();
     if((groups&Noclip)&&ghostOwned) {
         if(Current()&&!Command(L"Walk"))throw 1;
         ghostOwned=false;
@@ -118,7 +123,8 @@ static void Restore(DWORD groups) {
     }
 }
 static void Stop(bool restore) {
-    if(restore)Restore(127);
+    if(restore)Restore(255);
+    else LockClear();
     saved.clear();guards.clear();activeMask=0;
     if(timer && window)KillTimer(window,timer);
     timer=0;
@@ -196,8 +202,11 @@ static void FindGuards() {
     }
     nextGuards=GetTickCount64()+1500;
 }
+#include "Locks.h"
+
 static void Tick() {
     if(!Current()||GetTickCount64()-heartbeat>15000){Stop(true);return;}
+    if(activeMask&BypassLocks)LockTick();
     if(activeMask&Invisible)InvisiblePlayer();
     if(activeMask&NoReload)FullAmmoFlag();
     if(activeMask&(Ammo|NoReload|Gadgets))Inventory();
@@ -229,7 +238,7 @@ static bool HandleRequest(Request* r,void* view,HMODULE core,DWORD* objects) {
         heartbeat=GetTickCount64();
     } else {
         unsigned mask=0;int percent=0;wchar_t extra=0;
-        if(swscanf_s(r->map,L"--cheats:%u:%d%c",&mask,&percent,&extra,1)!=2||mask>127||percent<50||percent>300){r->result=6;return true;}
+        if(swscanf_s(r->map,L"--cheats:%u:%d%c",&mask,&percent,&extra,1)!=2||mask>255||percent<50||percent>300){r->result=6;return true;}
         auto vp=static_cast<Byte*>(view);
         auto pc=reinterpret_cast<Byte*>(U(vp,0x34));
         if(activeMask && (pc!=player||!Current()))Stop(true);
@@ -253,6 +262,7 @@ static bool HandleRequest(Request* r,void* view,HMODULE core,DWORD* objects) {
                     Restore(Noclip);r->result=3;return true;
                 }
             }
+            if((mask&BypassLocks)&&!(activeMask&BypassLocks)){try{LockResolve();}catch(...){r->result=44;return true;}}
             Restore(static_cast<DWORD>(activeMask)&~mask);
             activeMask=mask;speedPercent=percent;heartbeat=GetTickCount64();nextGuards=0;
             Tick();

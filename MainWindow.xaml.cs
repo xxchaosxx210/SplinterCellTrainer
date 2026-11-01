@@ -34,12 +34,16 @@ public partial class MainWindow : Window
 
     private GameMenuOverlay? _gameMenu;
     private readonly NpcOverlayMenu _overlayNpcs=new();
-    private bool _showOverlayNpcs;
+    private bool _showOverlayNpcs,_showOverlayLevels,_levelLoading;
+    private string? _utilityPage;
+    private LevelOverlayMenu? _overlayLevels;
+    private LevelChoice[] _levels=Array.Empty<LevelChoice>();
     private static readonly CheatOptions[] MenuOptions={CheatOptions.UnlimitedAmmo,CheatOptions.NoReload,CheatOptions.UnlimitedGadgets,CheatOptions.ReducedDetection,CheatOptions.MovementSpeed,CheatOptions.Invisibility,CheatOptions.Noclip};
     private void StartGameMenu()
     {
         try {
-            _gameMenu=new GameMenuOverlay(ReadGameMenu,ToggleGameMenuAsync,()=>_showOverlayNpcs?_overlayNpcs.RefreshAsync():Task.CompletedTask);
+            _overlayLevels=new LevelOverlayMenu(()=>_levels.Select(l=>new LevelMenuChoice(l.Map,l.Label)).ToArray(),LoadOverlayLevelAsync);
+            _gameMenu=new GameMenuOverlay(ReadGameMenu,ToggleGameMenuAsync,()=>_showOverlayNpcs&&!_levelLoading?_overlayNpcs.RefreshAsync():Task.CompletedTask);
             _gameMenu.Show();
             MenuStatus.Text="In-game menu: F6 to open / close; arrows to select; Enter to toggle.";
         }
@@ -47,36 +51,115 @@ public partial class MainWindow : Window
     }
     private GameMenuFrame ReadGameMenu()
     {
+        if(_utilityPage is not null)return ReadUtilityMenu();
+        if(_showOverlayLevels&&_overlayLevels is not null)return _overlayLevels.Frame;
         if(_showOverlayNpcs)return _overlayNpcs.Frame;
-        bool ready=!_overlayNpcs.Busy&&!_healthChanging&&!_cheatsChanging&&!_cheatRefreshBusy;
+        bool ready=!_levelLoading&&!_overlayNpcs.Busy&&!_healthChanging&&!_cheatsChanging&&!_cheatRefreshBusy;
         var settings=ReadCheatSettings();
         var items=new List<GameMenuEntry> {
             new("Enemy ESP",EnemyEspToggle.IsChecked==true,ready,"cheat:0"),
             new("Infinite health",InfiniteHealthToggle.IsChecked==true,ready,"cheat:1")
         };
         string[] labels={"Unlimited ammunition","No reload","Unlimited gadgets","Reduced detection",$"Movement speed ({settings.SpeedPercent/100.0:0.##}x)","Invisibility","Noclip (walls / doors)"};
-        for(int i=0;i<MenuOptions.Length;++i)items.Add(new(labels[i],settings.Options.HasFlag(MenuOptions[i]),ready,$"cheat:{i+2}"));
+        for(int i=0;i<MenuOptions.Length;++i){
+            if(MenuOptions[i]==CheatOptions.MovementSpeed)items.Add(new("Movement speed",false,true,"speed-menu",settings.Options.HasFlag(CheatOptions.MovementSpeed)?$"{settings.SpeedPercent/100.0:0.##}x":"OFF",false,true));
+            else items.Add(new(labels[i],settings.Options.HasFlag(MenuOptions[i]),ready,$"cheat:{i+2}"));
+        }
+        items.Add(new("Trainer tools / About / Exit",false,true,"tools-menu",null,false,true));
         items.Insert(0,new("Spawn NPCs",false,true,"spawns",null,false,true));
         items.Insert(1,new("Map NPCs",false,true,"map-npcs",null,false,true));
+        items.Insert(0,new("Load level",false,true,"levels",null,false,true));
         return new("main","TRAINER MENU",items.ToArray());
     }
     private async Task<string> ToggleGameMenuAsync(string key)
     {
+        if(key is "speed-menu" or "tools-menu"){
+            _showOverlayNpcs=false;_showOverlayLevels=false;_utilityPage=key=="speed-menu"?"speed":"tools";return "";
+        }
+        if(key=="back"&&_utilityPage is not null){_utilityPage=_utilityPage is "about" or "exit"?"tools":null;return "";}
+        if(_utilityPage is not null)return await ActivateUtilityAsync(key);
+        if(key=="levels"){
+            _showOverlayNpcs=false;_showOverlayLevels=true;_overlayLevels!.Open();return "Load maps from the game's main menu.";
+        }
+        if(key=="back"&&_showOverlayLevels){if(!_overlayLevels!.Back())_showOverlayLevels=false;return "";}
+        if(_showOverlayLevels)return await _overlayLevels!.ActivateAsync(key);
         if(key is "spawns" or "map-npcs"){
-            _showOverlayNpcs=true;
+            _showOverlayLevels=false;_showOverlayNpcs=true;
             if(key=="spawns")_overlayNpcs.OpenSpawns();else _overlayNpcs.OpenMapRoster();
             await _overlayNpcs.RefreshAsync();return "";
         }
         if(key=="back"){if(!_overlayNpcs.Back())_showOverlayNpcs=false;return "";}
-        if(_showOverlayNpcs)return await _overlayNpcs.ActivateAsync(key);
+        if(_showOverlayNpcs){if(_levelLoading)return "Wait for level loading to finish.";return await _overlayNpcs.ActivateAsync(key);}
         if(!key.StartsWith("cheat:")||!int.TryParse(key.AsSpan(6),out int selected))return "Select an option.";
-        if(_healthChanging||_cheatsChanging||_cheatRefreshBusy)return "Please wait for the current update.";
+        if(_levelLoading||_healthChanging||_cheatsChanging||_cheatRefreshBusy)return "Please wait for the current update.";
         if(selected==0){EnemyEspToggle.IsChecked=EnemyEspToggle.IsChecked!=true;return EspStatus.Text;}
         if(selected==1){await SetInfiniteHealthAsync(InfiniteHealthToggle.IsChecked!=true);return HealthStatus.Text;}
         if(selected<2||selected>=MenuOptions.Length+2)return "Select an option.";
         var settings=ReadCheatSettings();
         await ApplyCheatSettingsAsync(settings with {Options=settings.Options^MenuOptions[selected-2]});
         return CheatStatus.Text;
+    }
+
+    private GameMenuFrame ReadUtilityMenu()
+    {
+        bool ready=!_levelLoading&&!_overlayNpcs.Busy&&!_overlayNpcs.Refreshing&&!_healthChanging&&!_cheatsChanging&&!_cheatRefreshBusy;
+        var rows=new List<GameMenuEntry>();string title="TRAINER TOOLS";
+        GameMenuEntry Row(string label,string key,bool enabled=true,bool navigation=false,string? value=null)=>new(label,false,enabled,key,value,false,navigation);
+        if(_utilityPage=="speed"){
+            title="MOVEMENT SPEED";var settings=ReadCheatSettings();
+            rows.Add(new("Enable movement speed",settings.Options.HasFlag(CheatOptions.MovementSpeed),ready,"speed-toggle"));
+            foreach(int percent in new[]{50,100,150,200,300})rows.Add(Row($"{percent/100.0:0.##}x"+(percent==100?" (normal)":""),"speed:"+percent,ready,value:settings.SpeedPercent==percent?"Selected":""));
+        } else if(_utilityPage=="about"){
+            title="ABOUT / SUPPORTED GAME";
+            rows.Add(Row(VersionInfo.TrainerLabel,"info:version",false,value:""));
+            rows.Add(Row("Steam build "+VersionInfo.SupportedSteamBuild,"info:build",false,value:""));
+            rows.Add(Row("Steam App ID 13560","info:app",false,value:""));
+            rows.Add(Row("F6: menu / arrows: select / Enter: apply","info:keys",false,value:""));
+        } else if(_utilityPage=="exit"){
+            title="EXIT TRAINER?";
+            rows.Add(Row("Cancel","exit-cancel",navigation:true));
+            rows.Add(Row("Exit trainer and restore active cheats","exit-confirm",ready));
+        } else {
+            rows.Add(Row("Refresh game detection","detect-refresh",ready));
+            rows.Add(Row("Test game connection","connection-test",ready));
+            rows.Add(Row("Version / supported Steam build","about",navigation:true));
+            rows.Add(Row("Exit trainer","exit-menu",navigation:true));
+        }
+        rows.Add(Row("Back","back",navigation:true));
+        return new("utility:"+_utilityPage,title,rows.ToArray());
+    }
+    private async Task<string> ActivateUtilityAsync(string key)
+    {
+        if(key=="about"){_utilityPage="about";return "";}
+        if(key=="exit-menu"){_utilityPage="exit";return "The game will remain running.";}
+        if(key=="exit-cancel"){_utilityPage="tools";return "Exit cancelled.";}
+        if(_levelLoading||_overlayNpcs.Busy||_overlayNpcs.Refreshing||_healthChanging||_cheatsChanging||_cheatRefreshBusy)return "Please wait for the current update.";
+        if(key=="exit-confirm"&&_utilityPage=="exit"){
+            // Uses the existing close handler, which restores active cheat sessions first.
+            _ = Dispatcher.BeginInvoke(new Action(Close));return "Closing trainer…";
+        }
+        if(key=="detect-refresh"){RefreshGameStatus();return GameStatus.Text+" / "+GameDetail.Text;}
+        if(key=="connection-test"){
+            var games=Process.GetProcessesByName("SplinterCell");
+            try {
+                if(games.Length!=1)throw new InvalidOperationException("Start one copy of Splinter Cell first.");
+                return LevelStatus.Text=await DirectLevelLoader.RequestAsync(games[0],"--probe");
+            } finally {foreach(var game in games)game.Dispose();}
+        }
+        var settings=ReadCheatSettings();
+        if(key=="speed-toggle"){
+            await ApplyCheatSettingsAsync(settings with {Options=settings.Options^CheatOptions.MovementSpeed});return CheatStatus.Text;
+        }
+        if(key.StartsWith("speed:")&&int.TryParse(key.AsSpan(6),out int percent)&&new[]{50,100,150,200,300}.Contains(percent)){
+            var changed=settings with {SpeedPercent=percent};
+            if(settings.Options.HasFlag(CheatOptions.MovementSpeed)){
+                await ApplyCheatSettingsAsync(changed);return CheatStatus.Text;
+            }
+            _cheatsChanging=true;
+            try{ShowCheatSettings(changed);}finally{_cheatsChanging=false;}
+            return $"Speed set to {percent/100.0:0.##}x. Enable movement speed to apply it.";
+        }
+        return "Select an option.";
     }
 
     private EnemyOverlay? _enemyOverlay;
@@ -178,7 +261,7 @@ public partial class MainWindow : Window
 
     private async void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (_overlayNpcs.Busy || _overlayNpcs.Refreshing || _healthChanging || _cheatsChanging || _cheatRefreshBusy) { e.Cancel=true; return; }
+        if (_levelLoading || _overlayNpcs.Busy || _overlayNpcs.Refreshing || _healthChanging || _cheatsChanging || _cheatRefreshBusy) { e.Cancel=true; return; }
         if (_healthSession is null && _cheatSession is null) return;
         e.Cancel=true;
         if (!await ApplyCheatSettingsAsync(new(CheatOptions.None)))return;
@@ -314,12 +397,14 @@ public partial class MainWindow : Window
                     var map = System.IO.Path.GetFileNameWithoutExtension(path);
                     return new LevelChoice(map, FriendlyName(map));
                 }).ToArray();
+            _levels=levels;
             LevelPicker.ItemsSource = levels;
             if (levels.Length > 0) LevelPicker.SelectedIndex = 0;
             else LevelStatus.Text = "No installed maps found.";
         }
         catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
         {
+            _levels=Array.Empty<LevelChoice>();
             LevelStatus.Text = "Cannot read installed maps: " + ex.Message;
         }
     }
@@ -339,6 +424,26 @@ public partial class MainWindow : Window
         return $"{mission}  /  {map}";
     }
 
+    private async Task<string> LoadOverlayLevelAsync(LevelMenuChoice level)
+    {
+        if(_levelLoading||_overlayNpcs.Busy||_overlayNpcs.Refreshing||_healthChanging||_cheatsChanging||_cheatRefreshBusy)
+            throw new InvalidOperationException("Wait for the current trainer update to finish.");
+        if(!_levels.Any(l=>l.Map==level.Map)||!System.IO.File.Exists(System.IO.Path.Combine(GameDirectory,"maps",level.Map+".scl")))
+            throw new InvalidOperationException("The selected map is no longer installed.");
+        var games=Process.GetProcessesByName("SplinterCell");
+        try {
+            if(games.Length!=1)throw new InvalidOperationException("Start one copy of Splinter Cell and return to its main menu.");
+            _levelLoading=true;LoadLevelButton.IsEnabled=false;
+            LevelStatus.Text="Requesting map travel…";
+            // Shared loader checks the current map and refuses active-mission travel before sending OPEN.
+            return LevelStatus.Text=await DirectLevelLoader.RequestAsync(games[0],level.Map);
+        }
+        catch(Exception ex) when(ex is System.ComponentModel.Win32Exception or System.IO.IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException) {
+            LevelStatus.Text=ex.Message;throw;
+        }
+        finally {_levelLoading=false;LoadLevelButton.IsEnabled=true;foreach(var game in games)game.Dispose();}
+    }
+
     private async void LoadLevel_Click(object sender, RoutedEventArgs e)
     {
         if (LevelPicker.SelectedItem is not LevelChoice level) return;
@@ -354,7 +459,7 @@ public partial class MainWindow : Window
                         "Load level", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
                     LoadLevelButton.IsEnabled = false;
                     LevelStatus.Text = "Requesting map travel…";
-                    try { LevelStatus.Text = await DirectLevelLoader.RequestAsync(games[0], level.Map); }
+                    try { LevelStatus.Text = await LoadOverlayLevelAsync(new(level.Map,level.Label)); }
                     finally { LoadLevelButton.IsEnabled = true; }
                     return;
                 }

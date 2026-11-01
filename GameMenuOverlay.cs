@@ -9,7 +9,7 @@ using System.Windows.Threading;
 
 namespace SCTrainer;
 
-internal sealed record GameMenuEntry(string Label, bool On, bool Available, string Key, string? Value=null, bool Toggle=true,bool Navigation=false);
+internal sealed record GameMenuEntry(string Label, bool On, bool Available, string Key, string? Value=null, bool Toggle=true,bool Navigation=false,GameMenuInput? Input=null);
 internal sealed record GameMenuFrame(string Key,string Title,GameMenuEntry[] Entries);
 
 // Desktop overlay for the windowed game. Keyboard handling never enters the game process.
@@ -26,6 +26,7 @@ internal sealed class GameMenuOverlay : Window
     private GameMenuFrame _frame=new("main","TRAINER MENU",Array.Empty<GameMenuEntry>());
     private bool _refreshing;
     private string? _selectedKey;
+    private OverlayTextEditor? _editing;
     private readonly HookProc _hookProc;
     private readonly HashSet<int> _held=new();
     private IntPtr _hook,_hwnd,_game;
@@ -64,6 +65,7 @@ internal sealed class GameMenuOverlay : Window
         if(code<0||_closed||_game==IntPtr.Zero||GetForegroundWindow()!=_game||IsIconic(_game))
             return CallNextHookEx(_hook,code,message,data);
         int key=Marshal.ReadInt32(data);
+        if(_open&&_editing is not null&&key!=0x75)return EditKeyboard(code,message,data,key);
         bool down=message.ToInt64() is 0x100 or 0x104;
         bool up=message.ToInt64() is 0x101 or 0x105;
         if(key!=0x75&&(!_open||key is not (0x26 or 0x28 or 0x25 or 0x0d or 0x1b))&&!_held.Contains(key))
@@ -71,7 +73,7 @@ internal sealed class GameMenuOverlay : Window
         if(up){_held.Remove(key);return new IntPtr(1);}
         if(!down)return CallNextHookEx(_hook,code,message,data);
         bool repeat=!_held.Add(key);
-        if(key==0x75&&!repeat){_open=!_open;_message.Text="";}
+        if(key==0x75&&!repeat){_open=!_open;_editing=null;_message.Text="";}
         else if(_open&&key is 0x1b or 0x25&&!repeat) {
             if(_frame.Key=="main")_open=false;
             else Dispatcher.BeginInvoke(new Action(async()=>await ApplyAsync("back")));
@@ -88,13 +90,15 @@ internal sealed class GameMenuOverlay : Window
         return new IntPtr(1);
     }
 
-    private async Task ApplyAsync(string selected)
+    private async Task ApplyAsync(string selected,string? inputValue=null)
     {
         if(_closed||!_open||GetForegroundWindow()!=_game)return;
         var entry=_entries().Entries.FirstOrDefault(e=>e.Key==selected);
-        bool navigation=selected=="back"||entry?.Navigation==true;
-        if(selected!="back"&&entry?.Available!=true)return;
+        bool navigation=inputValue is null&&(selected=="back"||entry?.Navigation==true);
+        if(selected!="back"&&entry?.Available!=true){if(inputValue is not null)_message.Text="That NPC control is no longer available. Select the NPC again.";return;}
         if(_applying&&!navigation)return;
+        if(entry?.Input is not null&&inputValue is null){_editing=new OverlayTextEditor(selected,entry.Input);_message.Text="Type a value / Enter apply / Esc cancel / Ctrl+A select all";return;}
+        if(inputValue is not null){if(entry?.Input is null)return;selected+=":"+Uri.EscapeDataString(inputValue);}
         if(navigation) {
             try {_message.Text=await _activate(selected);}
             catch(Exception ex) when(ex is InvalidOperationException or Win32Exception or System.IO.IOException or UnauthorizedAccessException or FormatException or ArgumentException){_message.Text=ex.Message;}
@@ -117,7 +121,7 @@ internal sealed class GameMenuOverlay : Window
             finally{foreach(var game in games)game.Dispose();}
         }
         bool focused=_game!=IntPtr.Zero&&IsWindow(_game)&&!IsIconic(_game)&&GetForegroundWindow()==_game;
-        if(!focused){_open=false;_held.Clear();_panel.Visibility=Visibility.Hidden;return;}
+        if(!focused){_open=false;_editing=null;_held.Clear();_panel.Visibility=Visibility.Hidden;return;}
         if(!_open){_panel.Visibility=Visibility.Hidden;return;}
         if(!GetClientRect(_game,out var rect))return;
         var origin=new PointNative();if(!ClientToScreen(_game,ref origin))return;
@@ -126,6 +130,12 @@ internal sealed class GameMenuOverlay : Window
         int height=Math.Min((int)(470*scale),Math.Max(1,rect.Bottom-32));
         SetWindowPos(_hwnd,new IntPtr(-1),origin.X+12,origin.Y+16,width,height,0x10|0x40);
         _panel.Visibility=Visibility.Visible;
+        if(_editing is not null){
+            _title.Text="EDIT / "+_editing.Input.Label;_rows.Children.Clear();
+            _rows.Children.Add(new TextBlock {Text=_editing.Display,Foreground=Accent,FontSize=15,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,8,0,8)});
+            _rows.Children.Add(new TextBlock {Text="Enter: apply   Esc: cancel\nBackspace / Delete: edit\nCtrl+A: select all\nDecimal coordinates use a dot.",Foreground=Brushes.White,FontSize=12,TextWrapping=TextWrapping.Wrap});
+            return;
+        }
         var frame=_entries();
         if(frame.Key!=_frame.Key){_selected=0;_selectedKey=null;}
         var items=frame.Entries;
@@ -149,6 +159,46 @@ internal sealed class GameMenuOverlay : Window
             finally {_refreshing=false;}
         }
     }
+
+    private IntPtr EditKeyboard(int code,IntPtr message,IntPtr data,int key)
+    {
+        // Do not interfere with OS window switching. Focus loss cancels the editor.
+        if(key is 0x5b or 0x5c||GetAsyncKeyState(0x12)<0)return CallNextHookEx(_hook,code,message,data);
+        bool down=message.ToInt64() is 0x100 or 0x104;
+        if(!down){_held.Remove(key);return new IntPtr(1);}
+        bool repeat=!_held.Add(key);
+        if(repeat&&key is 0x0d or 0x1b)return new IntPtr(1);
+        var edit=_editing;if(edit is null)return new IntPtr(1);
+        if(key==0x1b){_editing=null;_message.Text="Edit cancelled.";return new IntPtr(1);}
+        if(key==0x0d){
+            try {string value=edit.Value();_editing=null;Dispatcher.BeginInvoke(new Action(async()=>await ApplyAsync(edit.Key,value)));}
+            catch(ArgumentException ex){_message.Text=ex.Message;}
+            return new IntPtr(1);
+        }
+        if(GetAsyncKeyState(0x11)<0){if(key==0x41)edit.SelectAll();return new IntPtr(1);}
+        switch(key){
+            case 0x08:edit.Backspace();break;
+            case 0x2e:edit.Delete();break;
+            case 0x25:edit.Move(-1);break;
+            case 0x27:edit.Move(1);break;
+            case 0x24:edit.Home();break;
+            case 0x23:edit.End();break;
+            default:
+                var state=new byte[256];GetKeyboardState(state);state[key]=0x80;
+                foreach(int modifier in new[]{0x10,0x11,0x12})if(GetAsyncKeyState(modifier)<0)state[modifier]=0x80;
+                var text=new System.Text.StringBuilder(8);
+                uint thread=GetWindowThreadProcessId(_game,out _);
+                int length=ToUnicodeEx((uint)key,(uint)Marshal.ReadInt32(data,4),state,text,text.Capacity,4,GetKeyboardLayout(thread));
+                if(length>0)edit.Insert(text.ToString(0,Math.Min(length,text.Length)));
+                break;
+        }
+        return new IntPtr(1);
+    }
+    [DllImport("user32.dll")]private static extern short GetAsyncKeyState(int key);
+    [DllImport("user32.dll")]private static extern bool GetKeyboardState(byte[] state);
+    [DllImport("user32.dll")]private static extern uint GetWindowThreadProcessId(IntPtr window,out uint process);
+    [DllImport("user32.dll")]private static extern IntPtr GetKeyboardLayout(uint thread);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode,ExactSpelling=true)]private static extern int ToUnicodeEx(uint key,uint scan,byte[] state,System.Text.StringBuilder text,int capacity,uint flags,IntPtr layout);
 
     private delegate IntPtr HookProc(int code,IntPtr message,IntPtr data);
     [StructLayout(LayoutKind.Sequential)]private struct RectNative {public int Left,Top,Right,Bottom;}

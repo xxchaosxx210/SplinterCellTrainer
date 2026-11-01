@@ -6,7 +6,7 @@ Windows trainer for the original Tom Clancy's Splinter Cell on Steam, built with
 
 
 
-**Trainer:** v0.10.1 prototype
+**Trainer:** v0.14.0 prototype
 
 **Supported Steam build:** 252083 (App ID 13560)
 
@@ -405,7 +405,7 @@ and quickload returned to gameplay without a GPF. Regression checks also cover
 activity eligibility for normal versus unconscious/dead/removed/special states.
 
 
-## Map NPCs and position editing (v0.10.1)
+## Map NPCs and position editing (v0.14.0)
 
 The manager automatically discovers EAIPawn instances in the current loaded
 mission, including guards, civilians, bodies and scripted characters. Each row
@@ -439,3 +439,41 @@ manager. Regression checks cover origins, removal protection, position eligibili
 signed coordinates and invalid/nonfinite destination values.
 
 Removed trainer-spawned NPCs disappear from the manager list once the game confirms they are absent. Pending removals remain visible, and present unconscious or dead NPCs stay listed. Reopening the manager does not restore removed spawned entries.
+
+## Sam invisibility and noclip (v0.11.0)
+
+- **Invisibility (Sam)** applies the original Invisible cheat's player properties: Actor.bHidden and Pawn.Visibility=0. It hides Sam's model and causes guard SeePlayer handlers to ignore him. Sound, existing alerts, cameras and mission scripts are not guaranteed to ignore him. Switching off restores his original hidden bit and visibility byte, preserving adjacent fields.
+- **Noclip (walls and doors)** invokes the game's built-in Ghost command through the internal viewport command handler; no console window opens. Ghost disables world/actor collision and enters PlayerFlying. Enable while Sam is standing normally, outside ladders and interactions. Movement follows the camera direction. Move clear of walls, doors and floors before switching off; Walk restores normal walking and collision.
+- Both options use the existing game-thread session, automatic heartbeat expiry cleanup and trainer-close cleanup. They reset on player changes and do not enable infinite health. Native protocol 15 prevents older pinned helper code from handling the new options.
+
+Live checks passed against the running Steam mission: invisibility set the hidden bit and visibility 0, then restored original values (visible, 128). Noclip cleared world/actor blocking flags and changed walking physics/state to flying; switching off restored the original collision bits, walking physics and s_PlayerWalking. Both options together also restored correctly. Traversing specific walls and doors and enemy reactions still require gameplay verification.
+
+## In-game overlay menu (v0.12.0)
+
+Keep the trainer running and focus the windowed game. Press **F6** to open the menu on the left, **Up/Down** to select an option, **Enter** to toggle it, and **F6** or **Escape** to close it. Options share the desktop trainer's live state and existing validation, including mission-only restrictions. Movement speed uses the multiplier selected in the trainer.
+
+The menu is a transparent, click-through desktop overlay; it does not inject rendering into the game or open its console. While open, menu navigation keys are consumed so they do not also navigate the game. Other gameplay keys remain active; opening the menu does not pause gameplay. The menu closes on loss of game focus and removes its keyboard hook when the trainer closes. Keyboard handling is restricted to the foreground Splinter Cell window.
+
+Overlay verification: clean build (zero warnings/errors), Insert open/close, Down selection, and Enter routing to the existing mission-only safeguard all passed at the live game main menu. Cheat activation from the overlay during an active mission still needs gameplay verification.
+
+The overlay shortcut is now F6, replacing Insert for laptop keyboard compatibility. On HP action-key layouts, Fn+F6 may be required to send F6.
+
+## Spawning through the overlay (v0.13.0)
+
+Press **F6**, select **Spawn NPCs**, then use **Spawn guard in front of Sam**, **Manage spawned NPCs**, or **Remove all spawned NPCs**. The live roster only shows present trainer-spawned guards (maximum eight); removed guards disappear automatically. Select a guard for condition, activity, health presets (100/75/50/25/1), movement in front of Sam, and removal. The same actor-state checks and native handlers used by the desktop NPC manager apply.
+
+**Left** or **Escape** goes back one submenu; from the main menu it closes the overlay. **F6** closes from any page. Remove all opens a confirmation page with **Cancel** selected first and only affects trainer-spawned NPCs. Menu actions wait for any current snapshot refresh, obtain fresh state, and identify the selected actor by game process and NPC ID, never by changing list position.
+
+Deterministic overlay tests cover stable-ID selection after reordering, removed actors, map-NPC protection, bulk confirmation/cancellation, native command forwarding, spawn limits, unavailable corpse actions, back navigation and actions queued behind snapshot refresh. Live Tbilisi verification passed for spawning, roster updates, knockout, revival, and single removal with immediate roster cleanup.
+
+Live bulk-removal verification also passed: confirmation defaulted to Cancel, confirmed removal left zero present spawned NPCs and all 11 map NPCs present, and the game remained running without a GPF. Both test guards were removed after testing.
+
+## Responsive NPC navigation and map roster (v0.14.0)
+
+**F6 → Map NPCs** lists NPCs present in the active map using their instance names, condition and activity. Select one for condition, activity, health presets or movement in front of Sam. Unsupported state transitions remain unavailable; map NPC removal is blocked in both the overlay and native helper. Spawned NPCs remain in their separate roster, and only present spawned NPCs count towards the eight-spawn limit.
+
+Condition changes in the overlay return after the game accepts the request; they do not hold the menu while knockout/revival animations finish. Live polling shows the actual changing condition. Back, roster selection and submenu browsing remain available while any NPC action is pending, while overlapping mutations are blocked until the current native request returns. Each mutation captures its actor ID before awaiting so browsing to a different NPC cannot retarget it. The desktop manager retains its existing confirmation behavior.
+
+Overlay regression checks cover separate named map and spawned rosters, map-removal protection, browsing another NPC's condition submenu during an outstanding edit, preserving the original edit target, and returning directly from the map roster to the main menu.
+
+Live v0.14.0 verification in Tbilisi: the named map roster populated and keyboard navigation scrolled to its bottom; a map NPC editor opened with removal disabled. A temporary spawned guard was knocked out, revived through the overlay, and Back navigation was accepted after the revival request. The test guard was removed afterward; the game remained running without a GPF. No map NPC properties were changed during this verification.

@@ -22,14 +22,62 @@ public partial class MainWindow : Window
         Width = Math.Min(Width, MaxWidth);
         Height = Math.Min(Height, MaxHeight);
         Closing += Window_Closing;
+        Loaded += (_,_) => StartGameMenu();
         PopulateLevels();
         RefreshGameStatus();
         _timer.Tick += Timer_Tick;
         _timer.Start();
-        Closed += (_, _) => { _enemyOverlay?.Close(); _timer.Stop(); _timer.Tick -= Timer_Tick; };
+        Closed += (_, _) => { _gameMenu?.Close(); _overlayNpcs.Dispose(); _enemyOverlay?.Close(); _timer.Stop(); _timer.Tick -= Timer_Tick; };
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    private GameMenuOverlay? _gameMenu;
+    private readonly NpcOverlayMenu _overlayNpcs=new();
+    private bool _showOverlayNpcs;
+    private static readonly CheatOptions[] MenuOptions={CheatOptions.UnlimitedAmmo,CheatOptions.NoReload,CheatOptions.UnlimitedGadgets,CheatOptions.ReducedDetection,CheatOptions.MovementSpeed,CheatOptions.Invisibility,CheatOptions.Noclip};
+    private void StartGameMenu()
+    {
+        try {
+            _gameMenu=new GameMenuOverlay(ReadGameMenu,ToggleGameMenuAsync,()=>_showOverlayNpcs?_overlayNpcs.RefreshAsync():Task.CompletedTask);
+            _gameMenu.Show();
+            MenuStatus.Text="In-game menu: F6 to open / close; arrows to select; Enter to toggle.";
+        }
+        catch(System.ComponentModel.Win32Exception ex){_gameMenu?.Close();_gameMenu=null;MenuStatus.Text="In-game menu unavailable: "+ex.Message;}
+    }
+    private GameMenuFrame ReadGameMenu()
+    {
+        if(_showOverlayNpcs)return _overlayNpcs.Frame;
+        bool ready=!_overlayNpcs.Busy&&!_healthChanging&&!_cheatsChanging&&!_cheatRefreshBusy;
+        var settings=ReadCheatSettings();
+        var items=new List<GameMenuEntry> {
+            new("Enemy ESP",EnemyEspToggle.IsChecked==true,ready,"cheat:0"),
+            new("Infinite health",InfiniteHealthToggle.IsChecked==true,ready,"cheat:1")
+        };
+        string[] labels={"Unlimited ammunition","No reload","Unlimited gadgets","Reduced detection",$"Movement speed ({settings.SpeedPercent/100.0:0.##}x)","Invisibility","Noclip (walls / doors)"};
+        for(int i=0;i<MenuOptions.Length;++i)items.Add(new(labels[i],settings.Options.HasFlag(MenuOptions[i]),ready,$"cheat:{i+2}"));
+        items.Insert(0,new("Spawn NPCs",false,true,"spawns",null,false,true));
+        items.Insert(1,new("Map NPCs",false,true,"map-npcs",null,false,true));
+        return new("main","TRAINER MENU",items.ToArray());
+    }
+    private async Task<string> ToggleGameMenuAsync(string key)
+    {
+        if(key is "spawns" or "map-npcs"){
+            _showOverlayNpcs=true;
+            if(key=="spawns")_overlayNpcs.OpenSpawns();else _overlayNpcs.OpenMapRoster();
+            await _overlayNpcs.RefreshAsync();return "";
+        }
+        if(key=="back"){if(!_overlayNpcs.Back())_showOverlayNpcs=false;return "";}
+        if(_showOverlayNpcs)return await _overlayNpcs.ActivateAsync(key);
+        if(!key.StartsWith("cheat:")||!int.TryParse(key.AsSpan(6),out int selected))return "Select an option.";
+        if(_healthChanging||_cheatsChanging||_cheatRefreshBusy)return "Please wait for the current update.";
+        if(selected==0){EnemyEspToggle.IsChecked=EnemyEspToggle.IsChecked!=true;return EspStatus.Text;}
+        if(selected==1){await SetInfiniteHealthAsync(InfiniteHealthToggle.IsChecked!=true);return HealthStatus.Text;}
+        if(selected<2||selected>=MenuOptions.Length+2)return "Select an option.";
+        var settings=ReadCheatSettings();
+        await ApplyCheatSettingsAsync(settings with {Options=settings.Options^MenuOptions[selected-2]});
+        return CheatStatus.Text;
+    }
 
     private EnemyOverlay? _enemyOverlay;
 
@@ -130,7 +178,7 @@ public partial class MainWindow : Window
 
     private async void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (_healthChanging || _cheatsChanging || _cheatRefreshBusy) { e.Cancel=true; return; }
+        if (_overlayNpcs.Busy || _overlayNpcs.Refreshing || _healthChanging || _cheatsChanging || _cheatRefreshBusy) { e.Cancel=true; return; }
         if (_healthSession is null && _cheatSession is null) return;
         e.Cancel=true;
         if (!await ApplyCheatSettingsAsync(new(CheatOptions.None)))return;
@@ -147,6 +195,8 @@ public partial class MainWindow : Window
         if(UnlimitedGadgetsToggle.IsChecked==true)options|=CheatOptions.UnlimitedGadgets;
         if(ReducedDetectionToggle.IsChecked==true)options|=CheatOptions.ReducedDetection;
         if(MovementSpeedToggle.IsChecked==true)options|=CheatOptions.MovementSpeed;
+        if(InvisibilityToggle.IsChecked==true)options|=CheatOptions.Invisibility;
+        if(NoclipToggle.IsChecked==true)options|=CheatOptions.Noclip;
         var selected=SpeedPicker.SelectedItem as System.Windows.Controls.ComboBoxItem;
         int speed=selected?.Tag is string value ? int.Parse(value,System.Globalization.CultureInfo.InvariantCulture) : 100;
         return new(options,speed);
@@ -155,7 +205,7 @@ public partial class MainWindow : Window
     private void SetCheatControls(bool available)
     {
         UnlimitedAmmoToggle.IsEnabled=NoReloadToggle.IsEnabled=UnlimitedGadgetsToggle.IsEnabled=
-            ReducedDetectionToggle.IsEnabled=MovementSpeedToggle.IsEnabled=available;
+            ReducedDetectionToggle.IsEnabled=MovementSpeedToggle.IsEnabled=InvisibilityToggle.IsEnabled=NoclipToggle.IsEnabled=available;
         SpeedPicker.IsEnabled=available && MovementSpeedToggle.IsChecked==true;
     }
 
@@ -166,6 +216,8 @@ public partial class MainWindow : Window
         UnlimitedGadgetsToggle.IsChecked=settings.Options.HasFlag(CheatOptions.UnlimitedGadgets);
         ReducedDetectionToggle.IsChecked=settings.Options.HasFlag(CheatOptions.ReducedDetection);
         MovementSpeedToggle.IsChecked=settings.Options.HasFlag(CheatOptions.MovementSpeed);
+        InvisibilityToggle.IsChecked=settings.Options.HasFlag(CheatOptions.Invisibility);
+        NoclipToggle.IsChecked=settings.Options.HasFlag(CheatOptions.Noclip);
         foreach(System.Windows.Controls.ComboBoxItem item in SpeedPicker.Items)
             if((string)item.Tag==settings.SpeedPercent.ToString(System.Globalization.CultureInfo.InvariantCulture))SpeedPicker.SelectedItem=item;
     }

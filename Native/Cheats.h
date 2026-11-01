@@ -8,7 +8,7 @@ namespace TrainerCheats {
 using Byte = unsigned char;
 using NameFn = const wchar_t* (__thiscall*)(void*);
 struct Field { const wchar_t* owner; const wchar_t* name; const wchar_t* type; DWORD offset=0, mask=0; WORD count=0; };
-enum { Ammo=1, NoReload=2, Gadgets=4, Detection=8, Speed=16 };
+enum { Ammo=1, NoReload=2, Gadgets=4, Detection=8, Speed=16, Invisible=32, Noclip=64 };
 static Field fields[] = {
     {L"EPlayerController",L"EPawn",L"ObjectProperty"},
     {L"EPawn",L"FullInventory",L"ObjectProperty"},
@@ -35,7 +35,10 @@ static Field fields[] = {
     {L"EPawn",L"VisTable_Alert",L"FloatProperty"},
     {L"EPawn",L"VisTable_Investigate",L"FloatProperty"},
     {L"EPawn",L"VisTable_Surprised",L"FloatProperty"},
-    {L"EPawn",L"VisTable_Peripheral",L"FloatProperty"}
+    {L"EPawn",L"VisTable_Peripheral",L"FloatProperty"},
+    {L"Actor",L"bHidden",L"BoolProperty"},
+    {L"Pawn",L"Visibility",L"ByteProperty"},
+    {L"Actor",L"bCollideWorld",L"BoolProperty"}
 };
 struct Saved { Byte* object; DWORD index,offset,mask,original,last,group; };
 struct Array { Byte* data; int count,capacity; };
@@ -89,21 +92,33 @@ static void Resolve() {
         if(!wcscmp(f.type,L"BoolProperty") && (!f.mask || (f.mask&(f.mask-1))))throw 1;
     }
 }
+static bool ghostOwned=false;
+static bool Command(const wchar_t* command) {
+    auto engine=GetModuleHandleW(L"Core.dll");
+    auto log=reinterpret_cast<void**>(GetProcAddress(engine,"?GLog@@3PAVFOutputDevice@@A"));
+    auto target=viewport+0x30;
+    auto exec=reinterpret_cast<int (__thiscall*)(void*,const wchar_t*,void*)>((*reinterpret_cast<void***>(target))[0]);
+    return log&&*log&&exec(target,command,*log)!=0;
+}
 static void Restore(DWORD groups) {
+    if((groups&Noclip)&&ghostOwned) {
+        if(Current()&&!Command(L"Walk"))throw 1;
+        ghostOwned=false;
+    }
     for(auto it=saved.begin();it!=saved.end();) {
         if(!(it->group&groups)){++it;continue;}
         if(Alive(it->object,it->index)) {
             auto address=reinterpret_cast<DWORD*>(it->object+it->offset);
             if(it->mask) {
-                if(it->original & it->mask) InterlockedOr(reinterpret_cast<volatile LONG*>(address),it->mask);
-                else InterlockedAnd(reinterpret_cast<volatile LONG*>(address),~it->mask);
+                InterlockedAnd(reinterpret_cast<volatile LONG*>(address),~it->mask);
+                InterlockedOr(reinterpret_cast<volatile LONG*>(address),it->original & it->mask);
             } else if(*address==it->last) *address=it->original;
         }
         it=saved.erase(it);
     }
 }
 static void Stop(bool restore) {
-    if(restore)Restore(31);
+    if(restore)Restore(127);
     saved.clear();guards.clear();activeMask=0;
     if(timer && window)KillTimer(window,timer);
     timer=0;
@@ -124,6 +139,17 @@ static void FullAmmoFlag() {
     for(auto& item:saved)if(item.object==player&&item.group==NoReload){slot=&item;break;}
     if(!slot){saved.push_back({player,playerIndex,f.offset,f.mask,U(player,f.offset),0,NoReload});}
     InterlockedOr(reinterpret_cast<volatile LONG*>(player+f.offset),f.mask);
+}
+static void InvisiblePlayer() {
+    const auto& hidden=fields[26];const auto& visibility=fields[27];
+    for(int i=0;i<2;++i) {
+        DWORD offset=i?visibility.offset:hidden.offset,mask=i?255:hidden.mask;
+        Saved* slot=nullptr;
+        for(auto& item:saved)if(item.object==pawn&&item.index==U(pawn,4)&&item.offset==offset&&item.group==Invisible){slot=&item;break;}
+        if(!slot)saved.push_back({pawn,U(pawn,4),offset,mask,U(pawn,offset),0,Invisible});
+        if(i)*reinterpret_cast<Byte*>(pawn+offset)=0;
+        else InterlockedOr(reinterpret_cast<volatile LONG*>(pawn+offset),mask);
+    }
 }
 static bool Consumable(Byte* item) {
     static const wchar_t* types[]={L"ESecondaryAmmo",L"EMedKit",L"EFragGrenade",L"EChemFlare",L"EFlare",L"EWallMine",L"EDisposablePick",L"ESmokeGrenade",L"EStickyCamera",L"EDiversionCamera",L"EStickyShocker",L"ERingAirfoilRound"};
@@ -172,6 +198,7 @@ static void FindGuards() {
 }
 static void Tick() {
     if(!Current()||GetTickCount64()-heartbeat>15000){Stop(true);return;}
+    if(activeMask&Invisible)InvisiblePlayer();
     if(activeMask&NoReload)FullAmmoFlag();
     if(activeMask&(Ammo|NoReload|Gadgets))Inventory();
     if(activeMask&Speed)for(int i=11;i<=19;++i)Scale(player,fields[i].offset,speedPercent/100.0f,Speed);
@@ -202,7 +229,7 @@ static bool HandleRequest(Request* r,void* view,HMODULE core,DWORD* objects) {
         heartbeat=GetTickCount64();
     } else {
         unsigned mask=0;int percent=0;wchar_t extra=0;
-        if(swscanf_s(r->map,L"--cheats:%u:%d%c",&mask,&percent,&extra,1)!=2||mask>31||percent<50||percent>300){r->result=6;return true;}
+        if(swscanf_s(r->map,L"--cheats:%u:%d%c",&mask,&percent,&extra,1)!=2||mask>127||percent<50||percent>300){r->result=6;return true;}
         auto vp=static_cast<Byte*>(view);
         auto pc=reinterpret_cast<Byte*>(U(vp,0x34));
         if(activeMask && (pc!=player||!Current()))Stop(true);
@@ -215,6 +242,16 @@ static bool HandleRequest(Request* r,void* view,HMODULE core,DWORD* objects) {
                 if(!IsA(pc,L"EPlayerController")||!package||!_wcsicmp(name(package),L"menu")){r->result=16;return true;}
                 viewport=vp;player=pc;playerIndex=U(pc,4);pawn=reinterpret_cast<Byte*>(U(pc,fields[0].offset));window=r->window;
                 if(!IsA(pawn,L"EPawn")){r->result=16;return true;}
+            }
+            if((mask&Noclip)&&!(activeMask&Noclip)) {
+                auto frame=reinterpret_cast<Byte*>(U(player,0x0c));
+                auto state=frame?reinterpret_cast<Byte*>(U(frame,0x1c)):nullptr;
+                // Avoid interrupting ladders, interactions, death or scripted movement.
+                if(!Alive(state)||wcscmp(name(state),L"s_PlayerWalking")){r->result=43;return true;}
+                ghostOwned=true;
+                if(!Command(L"Ghost")||(U(pawn,fields[28].offset)&fields[28].mask)) {
+                    Restore(Noclip);r->result=3;return true;
+                }
             }
             Restore(static_cast<DWORD>(activeMask)&~mask);
             activeMask=mask;speedPercent=percent;heartbeat=GetTickCount64();nextGuards=0;

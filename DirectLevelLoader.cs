@@ -26,7 +26,7 @@ internal static class DirectLevelLoader
         {
             ValidateGame(game);
             var version = await RunHelperAsync("--version");
-            if (version != "SCTravelHost:0.10.1:protocol14")
+            if (version != "SCTravelHost:0.14.0:protocol15")
                 throw new InvalidOperationException("Loader version mismatch. Close the trainer and use Launch Trainer.cmd.");
             if (map == "--probe") return await RunHelperAsync(game.Id.ToString(), map);
             var state = await RunHelperAsync(game.Id.ToString(), "--state");
@@ -60,7 +60,7 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if (await RunHelperAsync("--version") != "SCTravelHost:0.10.1:protocol14")
+            if (await RunHelperAsync("--version") != "SCTravelHost:0.14.0:protocol15")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             return await RunHelperAsync(game.Id.ToString(), enabled ? "--health-on" : "--health-off");
         }
@@ -76,7 +76,7 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if(await RunHelperAsync("--version")!="SCTravelHost:0.10.1:protocol14")
+            if(await RunHelperAsync("--version")!="SCTravelHost:0.14.0:protocol15")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             return await RunHelperAsync(game.Id.ToString(),command);
         }
@@ -90,7 +90,7 @@ internal static class DirectLevelLoader
         finally { Requests.Release(); }
     }
 
-    internal static async Task<string> NpcActionAsync(Process game,string action,uint id=0,int health=100,NpcConditionEdit? condition=null,NpcActivityEdit? activity=null,NpcPosition? position=null)
+    internal static async Task<string> NpcActionAsync(Process game,string action,uint id=0,int health=100,NpcConditionEdit? condition=null,NpcActivityEdit? activity=null,NpcPosition? position=null,bool waitForCompletion=true)
     {
         string command=action switch {
             "spawn"=>"--npc-spawn",
@@ -107,11 +107,11 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if(await RunHelperAsync("--version")!="SCTravelHost:0.10.1:protocol14")
+            if(await RunHelperAsync("--version")!="SCTravelHost:0.14.0:protocol15")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             await GameWindowFocus.PrepareAsync(game.MainWindowHandle);
             var reply=await RunHelperAsync(game.Id.ToString(),command);
-            if(action is not ("remove" or "condition"))return reply;
+            if(action is not ("remove" or "condition") || (action=="condition"&&!waitForCompletion))return reply;
             for(int attempt=0;attempt<(action=="condition"?75:25);++attempt)
             {
                 await Task.Delay(200);game.Refresh();

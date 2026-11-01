@@ -1,7 +1,7 @@
 #pragma once
 #include <cmath>
 
-// Bounded registry of trainer-created NPCs; all access runs on the game thread.
+// Bounded registry of map NPCs and trainer spawns; all access runs on the game thread.
 namespace TrainerSpawn {
 using Byte=unsigned char;
 struct Vec {float x,y,z;};
@@ -11,20 +11,31 @@ using DestroyFn=int (__thiscall*)(void*,void*,int);
 using EventFn=void (__thiscall*)(void*,void*,void*,void*);
 using FindFn=void* (__thiscall*)(void*,DWORD,int);
 using AddFn=int (__thiscall*)(void*,int,int);
-struct SpawnRecord {DWORD id;Byte *pawn,*controller,*level;DWORD pawnIndex,controllerIndex,levelIndex,pawnName,controllerName;bool removing;};
-struct Registry {DWORD version,nextId;SpawnRecord records[32];};
+struct SpawnRecord {DWORD id;Byte *pawn,*controller,*level;DWORD pawnIndex,controllerIndex,levelIndex,pawnName,controllerName;bool removing,spawned;};
+struct Registry {DWORD version,nextId;SpawnRecord records[256];};
 static Registry* registry=nullptr;
 static HANDLE recordHandle=nullptr;
 static bool SharedRecord() {
-    if(registry)return registry->version==2;
-    wchar_t key[96];swprintf_s(key,L"Local\\SCTrainer.SpawnRegistry.v2.%lu",GetCurrentProcessId());
+    if(registry)return registry->version==3;
+    wchar_t key[96];swprintf_s(key,L"Local\\SCTrainer.SpawnRegistry.v3.%lu",GetCurrentProcessId());
     recordHandle=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,sizeof(Registry),key);
     if(!recordHandle)return false;
     bool exists=GetLastError()==ERROR_ALREADY_EXISTS;
     registry=static_cast<Registry*>(MapViewOfFile(recordHandle,FILE_MAP_ALL_ACCESS,0,0,sizeof(Registry)));
     if(!registry){CloseHandle(recordHandle);recordHandle=nullptr;return false;}
-    if(!exists){ZeroMemory(registry,sizeof(Registry));registry->version=2;registry->nextId=1;}
-    return registry->version==2;
+    if(!exists){
+        ZeroMemory(registry,sizeof(Registry));registry->version=3;registry->nextId=1;
+        // Import the previous trainer registry so existing spawned NPCs keep their origin.
+        swprintf_s(key,L"Local\\SCTrainer.SpawnRegistry.v2.%lu",GetCurrentProcessId());
+        auto previous=OpenFileMappingW(FILE_MAP_READ,FALSE,key);
+        if(previous) {
+            struct Legacy {DWORD version,nextId;SpawnRecord records[32];};
+            auto old=static_cast<Legacy*>(MapViewOfFile(previous,FILE_MAP_READ,0,0,sizeof(Legacy)));
+            if(old&&old->version==2){registry->nextId=old->nextId;for(int i=0;i<32;++i){registry->records[i]=old->records[i];registry->records[i].spawned=old->records[i].id!=0;}}
+            if(old)UnmapViewOfFile(old);CloseHandle(previous);
+        }
+    }
+    return registry->version==3;
 }
 static DWORD U(Byte* p,DWORD o){return *reinterpret_cast<DWORD*>(p+o);}
 static DWORD Property(DWORD* objects,TrainerCheats::NameFn name,const wchar_t* owner,const wchar_t* wanted) {
@@ -47,13 +58,201 @@ static const wchar_t* State(Byte* obj,TrainerCheats::NameFn name) {
     auto state=frame?reinterpret_cast<Byte*>(U(frame,0x1c)):nullptr;
     return state&&TrainerCheats::Alive(state)?name(state):L"None";
 }
+static bool Unconscious(const wchar_t* pawn,const wchar_t* ai) {
+    return !wcscmp(pawn,L"s_Unconscious")||!wcscmp(pawn,L"s_InitiallyUnconscious")||
+        !wcscmp(pawn,L"s_Electrocuted")||!wcscmp(ai,L"s_Unconscious");
+}
+static void* Function(Byte* actor,const wchar_t* wanted,DWORD* objects,TrainerCheats::NameFn name,FindFn find) {
+    auto table=reinterpret_cast<Byte**>(objects[0]);
+    for(DWORD i=0;i<objects[1];++i) {
+        auto obj=table[i];if(!obj||_wcsicmp(name(obj),wanted))continue;
+        if(TrainerCheats::IsA(obj,L"Function"))return find(actor,U(obj,0x20),0);
+    }
+    return nullptr;
+}
+static bool Param(void* function,const wchar_t* wanted,DWORD offset,DWORD size,DWORD* objects,TrainerCheats::NameFn name) {
+    auto table=reinterpret_cast<Byte**>(objects[0]);
+    for(DWORD i=0;i<objects[1];++i) {
+        auto obj=table[i];if(!obj||reinterpret_cast<void*>(U(obj,0x18))!=function||_wcsicmp(name(obj),wanted))continue;
+        return U(obj,0x44)==offset&&*reinterpret_cast<WORD*>(obj+0x3a)==size;
+    }
+    return false;
+}
+static void Condition(Request* r,SpawnRecord* record,int action,DWORD* objects,TrainerCheats::NameFn name,FindFn find,EventFn process) {
+    auto pawn=record->pawn,ctrl=record->controller;
+    DWORD hp=Property(objects,name,L"Pawn",L"Health"),pawnController=Property(objects,name,L"Pawn",L"Controller"),controllerPawn=Property(objects,name,L"Controller",L"Pawn");
+    if(!hp||!pawnController||!controllerPawn){r->result=3;return;}
+    if(record->removing||!TrainerCheats::Alive(ctrl,record->controllerIndex)||U(ctrl,0x20)!=record->controllerName||
+        (U(ctrl,0x2c)&0x10)||reinterpret_cast<Byte*>(U(pawn,pawnController))!=ctrl||reinterpret_cast<Byte*>(U(ctrl,controllerPawn))!=pawn){r->result=35;return;}
+    auto ps=State(pawn,name),ai=State(ctrl,name);
+    bool unconscious=Unconscious(ps,ai);
+    bool dead=!wcscmp(ps,L"s_Dying")||!wcscmp(ps,L"s_Dead")||!wcscmp(ai,L"s_Dead");
+    if(dead){r->result=35;return;}
+    if(action==1) {
+        // The controller's state-specific Revive enters s_Groggy and handles recovery,
+        // collision, AI group notification and the pawn's return to DefaultState.
+        if(!unconscious||wcscmp(ai,L"s_Unconscious")){r->result=35;return;}
+        auto revive=Function(ctrl,L"Revive",objects,name,find);
+        if(!revive){r->result=3;return;}
+        process(ctrl,revive,nullptr,nullptr);r->result=36;return;
+    }
+    if(!unconscious && wcscmp(ai,L"s_Default")&&wcscmp(ai,L"s_Investigate")&&wcscmp(ai,L"s_Alert")){r->result=35;return;}
+    if(!wcscmp(ps,L"s_Carried")||!wcscmp(ps,L"s_Grabbed")){r->result=35;return;}
+    if(action==2) {
+        if(unconscious||static_cast<int>(U(pawn,hp))<=0){r->result=35;return;}
+        auto knocked=Function(pawn,L"Knocked",objects,name,find);
+        if(!knocked||!Param(knocked,L"PillTag",0,4,objects,name)||!Param(knocked,L"momentum",4,12,objects,name)){r->result=3;return;}
+        struct {int pill;Vec momentum;} parameters={1,{0,0,0}};
+        process(pawn,knocked,&parameters,nullptr);r->result=36;return;
+    }
+    if(action==3) {
+        auto died=Function(pawn,L"DiedE",objects,name,find);
+        DWORD keep=Property(objects,name,L"EPawn",L"bKeepNPCAlive"),mask=0;
+        auto table=reinterpret_cast<Byte**>(objects[0]);
+        for(DWORD i=0;i<objects[1];++i) {
+            auto obj=table[i];if(obj&&!wcscmp(name(obj),L"bKeepNPCAlive")&&reinterpret_cast<void*>(U(obj,0x18))&&
+                !wcscmp(name(reinterpret_cast<void*>(U(obj,0x18))),L"EPawn"))mask=U(obj,0x54);
+        }
+        if(!died||!keep||!mask||(mask&(mask-1))||!Param(died,L"Killer",0,4,objects,name)||
+            !Param(died,L"PillTag",4,4,objects,name)||!Param(died,L"momentum",8,12,objects,name)){r->result=3;return;}
+        DWORD original=U(pawn,keep);*reinterpret_cast<DWORD*>(pawn+keep)=original&~mask;
+        *reinterpret_cast<int*>(pawn+hp)=0;
+        struct {Byte* killer;int pill;Vec momentum;} parameters={nullptr,1,{0,0,0}};
+        process(pawn,died,&parameters,nullptr);
+        if(TrainerCheats::Alive(pawn,record->pawnIndex)&&U(pawn,0x20)==record->pawnName)
+            *reinterpret_cast<DWORD*>(pawn+keep)=(U(pawn,keep)&~mask)|(original&mask);
+        r->result=36;return;
+    }
+    r->result=6;
+}
+static int EnumValue(HMODULE core,DWORD* objects,TrainerCheats::NameFn name,const wchar_t* enumeration,const wchar_t* wanted) {
+    auto text=reinterpret_cast<const wchar_t* (__thiscall*)(void*)>(GetProcAddress(core,"??DFName@@QBEPBGXZ"));
+    if(!text)return -1;
+    auto table=reinterpret_cast<Byte**>(objects[0]);
+    for(DWORD i=0;i<objects[1];++i) {
+        auto obj=table[i];if(!obj||wcscmp(name(obj),enumeration)||!TrainerCheats::IsA(obj,L"Enum"))continue;
+        // UEnum's FName array in the validated Core.dll.
+        auto values=reinterpret_cast<DWORD*>(U(obj,0x38));DWORD count=U(obj,0x3c);
+        if(!values||count>256)return -1;
+        for(DWORD j=0;j<count;++j)if(!_wcsicmp(text(values+j),wanted))return static_cast<int>(j);
+    }
+    return -1;
+}
+static void Activity(Request* r,SpawnRecord* record,int activity,Byte* player,HMODULE core,DWORD* objects,TrainerCheats::NameFn name,FindFn find,EventFn process) {
+    if(activity<1||activity>5){r->result=6;return;}
+    auto pawn=record->pawn,ctrl=record->controller;
+    DWORD hp=Property(objects,name,L"Pawn",L"Health"),pc=Property(objects,name,L"Pawn",L"Controller"),cp=Property(objects,name,L"Controller",L"Pawn");
+    DWORD samOffset=Property(objects,name,L"EPlayerController",L"EPawn"),group=Property(objects,name,L"EAIController",L"Group");
+    if(!hp||!pc||!cp||!samOffset||!group){r->result=3;return;}
+    if(record->removing||static_cast<int>(U(pawn,hp))<=0||!TrainerCheats::Alive(ctrl,record->controllerIndex)||
+       U(ctrl,0x20)!=record->controllerName||(U(ctrl,0x2c)&0x10)||reinterpret_cast<Byte*>(U(pawn,pc))!=ctrl||
+       reinterpret_cast<Byte*>(U(ctrl,cp))!=pawn||!U(ctrl,group)){r->result=37;return;}
+    auto ps=State(pawn,name),state=State(ctrl,name);
+    if(Unconscious(ps,state)||(!wcscmp(ps,L"s_Grabbed"))||
+       (wcscmp(state,L"s_Default")&&wcscmp(state,L"s_Investigate")&&wcscmp(state,L"s_Alert"))){r->result=37;return;}
+    auto sam=reinterpret_cast<Byte*>(U(player,samOffset));
+    if(!TrainerCheats::IsA(sam,L"EPawn")){r->result=16;return;}
+    auto reset=Function(ctrl,L"ResetGoalList",objects,name,find);
+    auto routes=Function(ctrl,L"ClearRoutes",objects,name,find);
+    auto unlock=Function(ctrl,L"UnlockNavPoint",objects,name,find);
+    auto patrol=Function(ctrl,L"RemoveReferencesInPatrolInfo",objects,name,find);
+    auto replace=Function(ctrl,L"ReplaceDefaultGoal",objects,name,find);
+    auto add=Function(ctrl,L"AddGoal",objects,name,find);
+    auto goState=reinterpret_cast<int (__thiscall*)(void*,DWORD)>(GetProcAddress(core,"?GotoState@UObject@@UAE?AW4EGotoState@@VFName@@@Z"));
+    int guard=EnumValue(core,objects,name,L"GoalType",L"GOAL_Guard");
+    int move=EnumValue(core,objects,name,L"GoalType",activity==4?L"GOAL_QuickSearch":L"GOAL_MoveTo");
+    int flags=EnumValue(core,objects,name,L"MoveFlags",activity==3?L"MOVE_JogAlert":activity==4?L"MOVE_Search":L"MOVE_WalkNormal");
+    int wait=EnumValue(core,objects,name,L"MoveFlags",activity==5?L"MOVE_WalkAlert":L"MOVE_WalkNormal");
+    DWORD stateName=0;const wchar_t* desired=activity==4?L"s_Investigate":activity==5?L"s_Alert":L"s_Default";
+    auto table=reinterpret_cast<Byte**>(objects[0]);
+    for(DWORD i=0;i<objects[1];++i)if(table[i]&&!wcscmp(name(table[i]),desired)&&TrainerCheats::IsA(table[i],L"State"))stateName=U(table[i],0x20);
+    if(!reset||!routes||!unlock||!patrol||!replace||!add||!goState||!stateName||guard<0||move<0||flags<0||wait<0){r->result=3;return;}
+    // Verify every input layout before clearing an existing AI goal.
+    for(auto fn:{replace,add}) {
+        if(!Param(fn,L"_Type",0,1,objects,name)||!Param(fn,L"_Priority",1,1,objects,name)||
+           !Param(fn,L"_Location",4,12,objects,name)||!Param(fn,L"_Focus",0x10,12,objects,name)||
+           !Param(fn,L"_MoveFlags",0x34,1,objects,name)||!Param(fn,L"_WaitFlags",0x44,1,objects,name)||
+           !Param(fn,L"_Value",0x30,4,objects,name)){r->result=3;return;}
+    }
+    Vec destination=*reinterpret_cast<Vec*>(pawn+0xd4);
+    if(activity>=2&&activity<=4) {
+        destination=*reinterpret_cast<Vec*>(sam+0xd4);
+        float yaw=static_cast<int>(U(player,0xe4))*(6.28318530718f/65536.0f);
+        destination.x+=std::cos(yaw)*400;destination.y+=std::sin(yaw)*400;
+    }
+    if(!std::isfinite(destination.x)||!std::isfinite(destination.y)||!std::isfinite(destination.z)){r->result=7;return;}
+    process(ctrl,patrol,nullptr,nullptr);process(ctrl,unlock,nullptr,nullptr);process(ctrl,routes,nullptr,nullptr);
+    process(ctrl,reset,nullptr,nullptr);
+    alignas(4) Byte parameters[0x54]={};parameters[0]=static_cast<Byte>(guard);
+    memcpy(parameters+4,&destination,sizeof(Vec));memcpy(parameters+0x10,&destination,sizeof(Vec));
+    parameters[0x34]=static_cast<Byte>(wait);parameters[0x44]=static_cast<Byte>(wait);
+    process(ctrl,replace,parameters,nullptr);
+    if(activity>=2&&activity<=4) {
+        ZeroMemory(parameters,sizeof(parameters));parameters[0]=static_cast<Byte>(move);parameters[1]=255;
+        memcpy(parameters+4,&destination,sizeof(Vec));memcpy(parameters+0x10,&destination,sizeof(Vec));
+        parameters[0x34]=static_cast<Byte>(flags);parameters[0x44]=static_cast<Byte>(wait);
+        float arrivalRadius=50;memcpy(parameters+0x30,&arrivalRadius,4);
+        process(ctrl,add,parameters,nullptr);
+    }
+    goState(ctrl,stateName);
+    r->result=38;
+}
+static SpawnRecord* AvailableRecord() {
+    for(auto& entry:registry->records)if(!entry.id)return &entry;
+    SpawnRecord* candidate=nullptr;
+    for(auto& entry:registry->records)if(!entry.pawn&&(!candidate||entry.id<candidate->id))candidate=&entry;
+    return candidate;
+}
+static void DiscoverMap(Byte* level,Byte* info,DWORD* objects,TrainerCheats::NameFn name) {
+    if(!level||!info)return;
+    DWORD controllerOffset=Property(objects,name,L"Pawn",L"Controller");
+    if(!controllerOffset)return;
+    auto table=reinterpret_cast<Byte**>(objects[0]);
+    for(DWORD i=0;i<objects[1];++i) {
+        auto pawn=table[i];if(!pawn||!TrainerCheats::IsA(pawn,L"EAIPawn")||(U(pawn,0x2c)&0x10)||reinterpret_cast<Byte*>(U(pawn,0x6c))!=info)continue;
+        bool known=false;
+        for(auto& entry:registry->records)if(entry.pawn==pawn&&entry.pawnIndex==i&&entry.pawnName==U(pawn,0x20)){known=true;break;}
+        if(known)continue;
+        auto entry=AvailableRecord();if(!entry)break;
+        *entry={};entry->id=registry->nextId++;entry->pawn=pawn;entry->pawnIndex=i;entry->pawnName=U(pawn,0x20);
+        entry->level=level;entry->levelIndex=U(level,4);
+        auto ctrl=reinterpret_cast<Byte*>(U(pawn,controllerOffset));
+        if(TrainerCheats::IsA(ctrl,L"EAIController")&&!(U(ctrl,0x2c)&0x10)){entry->controller=ctrl;entry->controllerIndex=U(ctrl,4);entry->controllerName=U(ctrl,0x20);}
+    }
+}
+static void Position(Request* r,SpawnRecord* record,int mode,Vec destination,Byte* player,HMODULE engine,DWORD* objects,TrainerCheats::NameFn name) {
+    auto pawn=record->pawn,ctrl=record->controller;
+    DWORD hp=Property(objects,name,L"Pawn",L"Health"),pc=Property(objects,name,L"Pawn",L"Controller"),cp=Property(objects,name,L"Controller",L"Pawn");
+    if(!hp||!pc||!cp){r->result=3;return;}
+    if(record->removing||static_cast<int>(U(pawn,hp))<=0||!TrainerCheats::Alive(ctrl,record->controllerIndex)||
+       U(ctrl,0x20)!=record->controllerName||(U(ctrl,0x2c)&0x10)||reinterpret_cast<Byte*>(U(pawn,pc))!=ctrl||reinterpret_cast<Byte*>(U(ctrl,cp))!=pawn){r->result=37;return;}
+    auto state=State(ctrl,name),ps=State(pawn,name);
+    if(Unconscious(ps,state)||(wcscmp(state,L"s_Default")&&wcscmp(state,L"s_Investigate")&&wcscmp(state,L"s_Alert"))){r->result=37;return;}
+    if(mode) {
+        DWORD samOffset=Property(objects,name,L"EPlayerController",L"EPawn"),height=Property(objects,name,L"Actor",L"CollisionHeight");
+        if(!samOffset||!height){r->result=3;return;}
+        auto sam=reinterpret_cast<Byte*>(U(player,samOffset));if(!TrainerCheats::IsA(sam,L"EPawn")){r->result=16;return;}
+        destination=*reinterpret_cast<Vec*>(sam+0xd4);
+        destination.z+=*reinterpret_cast<float*>(pawn+height)-*reinterpret_cast<float*>(sam+height);
+        if(mode==1){float yaw=static_cast<int>(U(player,0xe4))*(6.28318530718f/65536.0f);destination.x+=std::cos(yaw)*200;destination.y+=std::sin(yaw)*200;}
+    }
+    for(float value:{destination.x,destination.y,destination.z})if(!std::isfinite(value)||std::fabs(value)>1000000){r->result=6;return;}
+    // Exactly the normal Actor.SetLocation path: FarMoveActor with all three
+    // optional flags zero. This preserves collision checks and volume updates.
+    auto move=reinterpret_cast<int (__thiscall*)(void*,void*,Vec,int,int,int)>(GetProcAddress(engine,"?FarMoveActor@ULevel@@UAEHPAVAActor@@VFVector@@HHH@Z"));
+    if(!move||reinterpret_cast<Byte*>(U(pawn,0x70))!=record->level){r->result=3;return;}
+    if(!move(record->level,pawn,destination,0,0,0)){r->result=40;return;}
+    auto actual=*reinterpret_cast<Vec*>(pawn+0xd4);
+    swprintf_s(r->map,L"NPC %lu position: %.2f, %.2f, %.2f",record->id,actual.x,actual.y,actual.z);
+    r->result=41;
+}
 static void Snapshot(Request* r,DWORD* objects,TrainerCheats::NameFn name,Byte* player) {
     wchar_t key[96];NpcSnapshotName(key,GetCurrentProcessId());
     auto handle=OpenFileMappingW(FILE_MAP_ALL_ACCESS,FALSE,key);
     if(!handle){r->result=7;return;}
     auto output=static_cast<NpcSnapshot*>(MapViewOfFile(handle,FILE_MAP_ALL_ACCESS,0,0,sizeof(NpcSnapshot)));
     if(!output){CloseHandle(handle);r->result=7;return;}
-    ZeroMemory(output,sizeof(NpcSnapshot));output->version=1;
+    ZeroMemory(output,sizeof(NpcSnapshot));output->version=2;
     DWORD hp=Property(objects,name,L"Pawn",L"Health"),vel=Property(objects,name,L"Actor",L"Velocity");
     DWORD pawnOffset=Property(objects,name,L"EPlayerController",L"EPawn");
     DWORD movement=Property(objects,name,L"EPawn",L"BaseMoveFlags");
@@ -62,10 +261,12 @@ static void Snapshot(Request* r,DWORD* objects,TrainerCheats::NameFn name,Byte* 
     auto sam=player&&pawnOffset?reinterpret_cast<Byte*>(U(player,pawnOffset)):nullptr;
     for(auto& item:registry->records) {
         if(!item.id)continue;
-        auto& n=output->entries[output->count++];n.id=item.id;
+        auto& n=output->entries[output->count++];n.id=item.id;n.spawned=item.spawned;
         wcscpy_s(n.pawnState,L"None");wcscpy_s(n.aiState,L"None");wcscpy_s(n.weapon,L"None");wcscpy_s(n.target,L"None");
         if(!item.pawn){n.present=0;continue;}
         n.present=1;n.removing=item.removing;
+        auto position=*reinterpret_cast<Vec*>(item.pawn+0xd4);n.x=position.x;n.y=position.y;n.z=position.z;
+        wcsncpy_s(n.actorName,name(item.pawn),_TRUNCATE);
         n.moveFlags=movement?*(item.pawn+movement):0;
         n.health=hp?static_cast<int>(U(item.pawn,hp)):-1;
         wcsncpy_s(n.type,name(reinterpret_cast<void*>(U(item.pawn,0x24))),_TRUNCATE);
@@ -93,11 +294,17 @@ static void Snapshot(Request* r,DWORD* objects,TrainerCheats::NameFn name,Byte* 
 static bool Process(Request* r,void* view,HMODULE core,HMODULE engine,DWORD* objects) {
     bool list=!wcscmp(r->map,L"--npc-list");
     bool spawnRequest=!wcscmp(r->map,L"--npc-spawn");
-    DWORD id=0;int desiredHealth=0;wchar_t extra=0;
+    DWORD id=0;Vec destination={};int desiredHealth=0,desiredCondition=0,desiredActivity=0;wchar_t extra=0;
     bool remove=swscanf_s(r->map,L"--npc-remove:%lu%c",&id,&extra,1)==1;
     bool heal=swscanf_s(r->map,L"--npc-health:%lu:%d%c",&id,&desiredHealth,&extra,1)==2;
-    if(!list&&!spawnRequest&&!remove&&!heal)return false;
-    if((remove||heal)&&!id){r->result=6;return true;}
+    bool condition=swscanf_s(r->map,L"--npc-condition:%lu:%d%c",&id,&desiredCondition,&extra,1)==2;
+    bool activity=swscanf_s(r->map,L"--npc-activity:%lu:%d%c",&id,&desiredActivity,&extra,1)==2;
+    bool coordinates=swscanf_s(r->map,L"--npc-position:%lu:%f:%f:%f%c",&id,&destination.x,&destination.y,&destination.z,&extra,1)==4;
+    bool front=swscanf_s(r->map,L"--npc-front:%lu%c",&id,&extra,1)==1;
+    bool toSam=swscanf_s(r->map,L"--npc-to-sam:%lu%c",&id,&extra,1)==1;
+    bool position=coordinates||front||toSam;
+    if(!list&&!spawnRequest&&!remove&&!heal&&!condition&&!activity&&!position)return false;
+    if((remove||heal||condition||activity||position)&&!id){r->result=6;return true;}
     if(!SharedRecord()){r->result=7;return true;}
     auto name=reinterpret_cast<TrainerCheats::NameFn>(GetProcAddress(core,"?GetName@UObject@@QBEPBGXZ"));
     auto spawn=reinterpret_cast<SpawnFn>(GetProcAddress(engine,"?SpawnActor@ULevel@@UAEPAVAActor@@PAVUClass@@VFName@@VFVector@@VFRotator@@PAV2@HH4PAVAPawn@@@Z"));
@@ -127,15 +334,20 @@ static bool Process(Request* r,void* view,HMODULE core,HMODULE engine,DWORD* obj
             item.pawn=nullptr;item.controller=nullptr;item.removing=false;
         }
     }
+    DiscoverMap(level,info,objects,name);
     if(list){Snapshot(r,objects,name,player);return true;}
     if(!level||!possessName){r->result=16;return true;}
     SpawnRecord* record=nullptr;
-    if(remove||heal) {
+    if(remove||heal||condition||activity||position) {
         for(auto& item:registry->records)if(item.id==id)record=&item;
         if(!record||!record->pawn){r->result=22;return true;}
     }
     if(GetForegroundWindow()!=r->window || IsIconic(r->window)){r->result=14;return true;}
+    if(position){Position(r,record,front?1:toSam?2:0,destination,player,engine,objects,name);return true;}
+    if(activity){Activity(r,record,desiredActivity,player,core,objects,name,find,process);return true;}
+    if(condition){Condition(r,record,desiredCondition,objects,name,find,process);return true;}
     if(remove) {
+        if(!record->spawned){r->result=39;return true;}
         if(record->removing){r->result=28;return true;}
         DWORD lifeSpan=Property(objects,name,L"Actor",L"LifeSpan");
         if(!lifeSpan){r->result=3;return true;}
@@ -175,11 +387,10 @@ static bool Process(Request* r,void* view,HMODULE core,HMODULE engine,DWORD* obj
         *reinterpret_cast<int*>(record->pawn+health)=desiredHealth;r->result=34;return true;
     }
     int active=0;
-    for(auto& item:registry->records)if(item.pawn)++active;
+    for(auto& item:registry->records)if(item.pawn&&item.spawned)++active;
     if(active>=8){r->result=23;return true;}
-    for(auto& item:registry->records)if(!item.id){record=&item;break;}
-    if(!record)for(auto& item:registry->records)if(!item.pawn&&(!record||item.id<record->id))record=&item;
-    if(!record){r->result=23;return true;}
+    record=AvailableRecord();
+    if(!record){r->result=42;return true;}
     DWORD pawnOffset=Property(objects,name,L"EPlayerController",L"EPawn");
     DWORD invOffset=Property(objects,name,L"EPawn",L"FullInventory");
     DWORD listOffset=Property(objects,name,L"EInventory",L"InventoryList");
@@ -229,7 +440,7 @@ static bool Process(Request* r,void* view,HMODULE core,HMODULE engine,DWORD* obj
         if(created)break;
     }
     if(!created){r->result=25;return true;}
-    *record={};record->id=registry->nextId++;
+    *record={};record->id=registry->nextId++;record->spawned=true;
     record->level=level;record->levelIndex=U(level,4);record->pawn=created;record->pawnIndex=U(created,4);record->pawnName=U(created,0x20);record->controller=nullptr;
     // Use engine allocation so reflected class arrays have normal ownership and GC behaviour.
     auto inventory=reinterpret_cast<TrainerCheats::Array*>(created+initialOffset);

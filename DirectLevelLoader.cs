@@ -26,7 +26,7 @@ internal static class DirectLevelLoader
         {
             ValidateGame(game);
             var version = await RunHelperAsync("--version");
-            if (version != "SCTravelHost:0.7.0:protocol10")
+            if (version != "SCTravelHost:0.10.1:protocol14")
                 throw new InvalidOperationException("Loader version mismatch. Close the trainer and use Launch Trainer.cmd.");
             if (map == "--probe") return await RunHelperAsync(game.Id.ToString(), map);
             var state = await RunHelperAsync(game.Id.ToString(), "--state");
@@ -60,7 +60,7 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if (await RunHelperAsync("--version") != "SCTravelHost:0.7.0:protocol10")
+            if (await RunHelperAsync("--version") != "SCTravelHost:0.10.1:protocol14")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             return await RunHelperAsync(game.Id.ToString(), enabled ? "--health-on" : "--health-off");
         }
@@ -76,7 +76,7 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if(await RunHelperAsync("--version")!="SCTravelHost:0.7.0:protocol10")
+            if(await RunHelperAsync("--version")!="SCTravelHost:0.10.1:protocol14")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             return await RunHelperAsync(game.Id.ToString(),command);
         }
@@ -90,11 +90,16 @@ internal static class DirectLevelLoader
         finally { Requests.Release(); }
     }
 
-    internal static async Task<string> NpcActionAsync(Process game,string action,uint id=0,int health=100)
+    internal static async Task<string> NpcActionAsync(Process game,string action,uint id=0,int health=100,NpcConditionEdit? condition=null,NpcActivityEdit? activity=null,NpcPosition? position=null)
     {
         string command=action switch {
             "spawn"=>"--npc-spawn",
+            "front" when id>0=>$"--npc-front:{id}",
+            "to-sam" when id>0=>$"--npc-to-sam:{id}",
+            "position" when id>0 && position.HasValue && position.Value.IsValid=>FormattableString.Invariant($"--npc-position:{id}:{position.Value.X:R}:{position.Value.Y:R}:{position.Value.Z:R}"),
             "remove" when id>0=>$"--npc-remove:{id}",
+            "activity" when id>0 && activity.HasValue && Enum.IsDefined(activity.Value)=>$"--npc-activity:{id}:{(int)activity.Value}",
+            "condition" when id>0 && condition is NpcConditionEdit.Alive or NpcConditionEdit.KnockedOut or NpcConditionEdit.Dead=>$"--npc-condition:{id}:{(int)condition.Value}",
             "health" when id>0 && health is >=1 and <=100=>$"--npc-health:{id}:{health}",
             _=>throw new ArgumentException("Invalid NPC action.")
         };
@@ -102,20 +107,26 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if(await RunHelperAsync("--version")!="SCTravelHost:0.7.0:protocol10")
+            if(await RunHelperAsync("--version")!="SCTravelHost:0.10.1:protocol14")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             await GameWindowFocus.PrepareAsync(game.MainWindowHandle);
             var reply=await RunHelperAsync(game.Id.ToString(),command);
-            if(action!="remove")return reply;
-            for(int attempt=0;attempt<25;++attempt)
+            if(action is not ("remove" or "condition"))return reply;
+            for(int attempt=0;attempt<(action=="condition"?75:25);++attempt)
             {
                 await Task.Delay(200);game.Refresh();
                 if(game.HasExited || game.MainWindowTitle.Contains("Critical Error",StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException("The game stopped during removal.");
+                    throw new InvalidOperationException("The game stopped during the NPC update.");
                 var entries=NpcSnapshot.Parse(await RunHelperAsync(game.Id.ToString(),"--npc-list"));
-                if(!entries.Any(n=>n.Id==id&&n.Present))return $"NPC {id} removed.";
+                if(action=="remove"&&!entries.Any(n=>n.Id==id&&n.Present))return $"NPC {id} removed.";
+                if(action=="condition") {
+                    var npc=entries.FirstOrDefault(n=>n.Id==id&&n.Present);
+                    string expected=condition switch {NpcConditionEdit.Alive=>"Alive",NpcConditionEdit.KnockedOut=>"Knocked out",_=>"Dead"};
+                    if(npc?.Condition==expected)return $"NPC {id}: {expected}.";
+                    if(npc is null)throw new InvalidOperationException("The selected NPC disappeared before its condition was confirmed.");
+                }
             }
-            throw new InvalidOperationException("Removal scheduled but not yet confirmed. Leave the game focused and unpaused.");
+            throw new InvalidOperationException(action=="condition"?"Condition change requested but not yet confirmed. Leave the game focused and unpaused.":"Removal scheduled but not yet confirmed. Leave the game focused and unpaused.");
         }
         finally{Requests.Release();}
     }

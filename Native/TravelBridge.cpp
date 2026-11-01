@@ -4,9 +4,9 @@
 #include "NpcProtocol.h"
 
 struct Request { DWORD version; DWORD pid; HWND window; LONG result; wchar_t map[128]; };
-static constexpr DWORD Version = 10;
-static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v10";
-static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v10.%lu", pid); }
+static constexpr DWORD Version = 14;
+static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v14";
+static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v14.%lu", pid); }
 
 #ifdef BRIDGE_DLL
 #include "Cheats.h"
@@ -182,7 +182,7 @@ static BOOL CALLBACK FindWindow(HWND window, LPARAM context) {
     return TRUE;
 }
 int wmain(int argc, wchar_t** argv) {
-    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.7.0:protocol10"); return 0; }
+    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.10.1:protocol14"); return 0; }
     if (argc != 3) { puts("Expected process ID and map."); return 2; }
     Search search = { wcstoul(argv[1], nullptr, 10), nullptr };
     EnumWindows(FindWindow, reinterpret_cast<LPARAM>(&search));
@@ -220,12 +220,12 @@ int wmain(int argc, wchar_t** argv) {
     UnmapViewOfFile(request); CloseHandle(mapping); FreeLibrary(dll);
     if (!sent) { puts("Game did not respond; map load not confirmed. Do not retry until responsive."); return 6; }
     if(npcData) {
-        bool valid=sent&&result==32&&npcData->version==1&&npcData->count<=32;
+        bool valid=sent&&result==32&&npcData->version==2&&npcData->count<=256;
         if(valid) {
-            puts("NPCS:1");
+            puts("NPCS:2");
             for(DWORD i=0;i<npcData->count;++i) {
                 auto& n=npcData->entries[i];
-                wprintf(L"%lu|%lu|%lu|%lu|%lu|%d|%.2f|%.2f|%s|%s|%s|%s|%s\n",n.id,n.present,n.removing,n.controller,n.moveFlags,n.health,n.speed,n.distance,n.type,n.pawnState,n.aiState,n.weapon,n.target);
+                wprintf(L"%lu|%lu|%lu|%lu|%lu|%d|%.2f|%.2f|%s|%s|%s|%s|%s|%lu|%.3f|%.3f|%.3f|%s\n",n.id,n.present,n.removing,n.controller,n.moveFlags,n.health,n.speed,n.distance,n.type,n.pawnState,n.aiState,n.weapon,n.target,n.spawned,n.x,n.y,n.z,n.actorName);
             }
         }
         UnmapViewOfFile(npcData);CloseHandle(npcMapping);
@@ -235,6 +235,14 @@ int wmain(int argc, wchar_t** argv) {
     case 1: puts("Map travel queued on the game thread."); return 0;
     case 11: wprintf(L"STATE:%s\n", requestMap); return 0;
     case 12: puts("STATE:loading"); return 0;
+    case 39: puts("Map NPC removal is disabled. Only trainer-spawned NPCs can be removed."); return 20;
+    case 40: puts("Position rejected by the game collision check. Choose an unobstructed destination."); return 21;
+    case 41: wprintf(L"%s\n",requestMap); return 0;
+    case 42: puts("NPC registry is full (256 entries). Change maps to release old actors."); return 22;
+    case 37: puts("Activity editing requires a living, conscious NPC in a normal AI state with its original controller."); return 19;
+    case 38: puts("NPC activity goal assigned. Movement and search target a point four metres in front of Sam; the game handles pathfinding and reactions."); return 0;
+    case 35: puts("This condition transition is unavailable. Revive requires an unconscious NPC with its original AI; dead NPCs cannot be resurrected."); return 18;
+    case 36: puts("NPC condition transition requested."); return 0;
     case 33: puts("Health editing is only available for living conscious NPCs; this does not revive an NPC."); return 17;
     case 34: puts("NPC health updated."); return 0;
     case 30: puts("AI-group cleanup did not complete; actor removal was not scheduled."); return 16;

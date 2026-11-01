@@ -6,7 +6,7 @@ Windows trainer for the original Tom Clancy's Splinter Cell on Steam, built with
 
 
 
-**Trainer:** v0.18.0 prototype
+**Trainer:** v0.19.0 prototype
 
 **Supported Steam build:** 252083 (App ID 13560)
 
@@ -405,7 +405,7 @@ and quickload returned to gameplay without a GPF. Regression checks also cover
 activity eligibility for normal versus unconscious/dead/removed/special states.
 
 
-## Map NPCs and position editing (v0.18.0)
+## Map NPCs and position editing (v0.19.0)
 
 The manager automatically discovers EAIPawn instances in the current loaded
 mission, including guards, civilians, bodies and scripted characters. Each row
@@ -476,7 +476,7 @@ Condition changes in the overlay return after the game accepts the request; they
 
 Overlay regression checks cover separate named map and spawned rosters, map-removal protection, browsing another NPC's condition submenu during an outstanding edit, preserving the original edit target, and returning directly from the map roster to the main menu.
 
-Live v0.18.0 verification in Tbilisi: the named map roster populated and keyboard navigation scrolled to its bottom; a map NPC editor opened with removal disabled. A temporary spawned guard was knocked out, revived through the overlay, and Back navigation was accepted after the revival request. The test guard was removed afterward; the game remained running without a GPF. No map NPC properties were changed during this verification.
+Live v0.19.0 verification in Tbilisi: the named map roster populated and keyboard navigation scrolled to its bottom; a map NPC editor opened with removal disabled. A temporary spawned guard was knocked out, revived through the overlay, and Back navigation was accepted after the revival request. The test guard was removed afterward; the game remained running without a GPF. No map NPC properties were changed during this verification.
 
 ## Overlay level loading (v0.15.0)
 
@@ -516,3 +516,15 @@ Enable **F6 → Bypass locks**, close the overlay, then use the game's normal in
 Lock metadata is resolved separately when this option is enabled, so unsupported lock scripts do not prevent unrelated cheats. Native protocol 16 separates this helper from earlier pinned code. The normal interaction paths were researched using the primary [EDoorInteraction](https://github.com/Joshhhuaaa/EnhancedSC/blob/main/UnrealScript/EchelonIngredient/Classes/EDoorInteraction.uc), [ESwingingDoor](https://github.com/Joshhhuaaa/EnhancedSC/blob/main/UnrealScript/EchelonIngredient/Classes/ESwingingDoor.uc) and [EKeyPad](https://github.com/Joshhhuaaa/EnhancedSC/blob/main/UnrealScript/EchelonIngredient/Classes/EKeyPad.uc) sources and checked against loaded property metadata.
 
 Validation: clean native/WPF build, native policy checks for scope/restoration/player-owned keypad use, cheat-mask checks, overlay and tray regression checks. A live toggle smoke test in Tbilisi part 2 accepted the new flag and confirmed that the nearby keypad door remained locked and its access-code storage unchanged before interaction; the toggle was switched off afterward. Actual keypad success and ordinary lockpick-door interaction still require gameplay confirmation.
+
+## Quiet lights out (v0.19.0)
+
+Enable **F6 → Quiet lights out**, then close the overlay to inspect the level. Toggle it off to restore surviving lights. The feature suppresses supported Light/ELight and EGamePlayObjectLight actors throughout the active level, while skipping player/inventory-owned lighting and deleted actors. It changes output type/brightness, glow and beam flags, and prevents automatic initial-type restoration while active. Renderer cache flags are invalidated using reflected fields; no damage, sound, trigger, switch-state or Level.AddChange functions are called.
+
+Original output values are retained by actor pointer, object index, name and level identity. New nonzero output values written by the game while enabled are remembered before being suppressed. Disabling, heartbeat expiry and normal trainer exit restore surviving identities whose values are still muted. Known destroyed fixture states are not relit. Physical meshes, collision, health, alarm flags and AI state are unchanged by this feature.
+
+This is output suppression rather than a no-suspicion guarantee: guards or scripts may still react to the resulting darkness. Baked/ambient illumination and emissive materials may remain visible. World changes made while the toggle is active, including saving or operating real switches, still require gameplay testing.
+
+The primary [ELight](https://github.com/Joshhhuaaa/EnhancedSC/blob/main/UnrealScript/Echelon/Classes/ELight.uc) and [EGamePlayObjectLight](https://github.com/Joshhhuaaa/EnhancedSC/blob/main/UnrealScript/Echelon/Classes/EGamePlayObjectLight.uc) implementations were consulted, and field owners/types, LT_None=0, and renderer cache metadata were verified read-only against the running game. Native protocol 17 separates the helper from earlier pinned versions.
+
+Validation: clean native/WPF build, native light scope/restoration policy checks, cheat flag checks and overlay/NPC regression checks. The user confirmed the quiet-lights feature works in gameplay.

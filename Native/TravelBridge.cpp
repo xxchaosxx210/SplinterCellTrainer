@@ -4,9 +4,9 @@
 #include "NpcProtocol.h"
 
 struct Request { DWORD version; DWORD pid; HWND window; LONG result; wchar_t map[128]; };
-static constexpr DWORD Version = 16;
-static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v16";
-static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v16.%lu", pid); }
+static constexpr DWORD Version = 17;
+static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v17";
+static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v17.%lu", pid); }
 
 #ifdef BRIDGE_DLL
 #include "Cheats.h"
@@ -182,7 +182,7 @@ static BOOL CALLBACK FindWindow(HWND window, LPARAM context) {
     return TRUE;
 }
 int wmain(int argc, wchar_t** argv) {
-    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.18.0:protocol16"); return 0; }
+    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.19.0:protocol17"); return 0; }
     if (argc != 3) { puts("Expected process ID and map."); return 2; }
     Search search = { wcstoul(argv[1], nullptr, 10), nullptr };
     EnumWindows(FindWindow, reinterpret_cast<LPARAM>(&search));
@@ -235,6 +235,7 @@ int wmain(int argc, wchar_t** argv) {
     case 1: puts("Map travel queued on the game thread."); return 0;
     case 11: wprintf(L"STATE:%s\n", requestMap); return 0;
     case 12: puts("STATE:loading"); return 0;
+    case 45: puts("Quiet lights out is unavailable for the loaded lighting properties. No lights were changed."); return 25;
     case 44: puts("Lock bypass is unavailable for the loaded game scripts. No locks were changed."); return 24;
     case 43: puts("Enable noclip while Sam is standing normally, outside interactions or menus."); return 23;
     case 39: puts("Map NPC removal is disabled. Only trainer-spawned NPCs can be removed."); return 20;

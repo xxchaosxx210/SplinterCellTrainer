@@ -26,7 +26,7 @@ internal static class DirectLevelLoader
         {
             ValidateGame(game);
             var version = await RunHelperAsync("--version");
-            if (version != "SCTravelHost:0.19.0:protocol17")
+            if (version != "SCTravelHost:0.20.0:protocol18")
                 throw new InvalidOperationException("Loader version mismatch. Close the trainer and use Launch Trainer.cmd.");
             if (map == "--probe") return await RunHelperAsync(game.Id.ToString(), map);
             var state = await RunHelperAsync(game.Id.ToString(), "--state");
@@ -60,7 +60,7 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if (await RunHelperAsync("--version") != "SCTravelHost:0.19.0:protocol17")
+            if (await RunHelperAsync("--version") != "SCTravelHost:0.20.0:protocol18")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             return await RunHelperAsync(game.Id.ToString(), enabled ? "--health-on" : "--health-off");
         }
@@ -68,6 +68,7 @@ internal static class DirectLevelLoader
     }
 
     internal static Task<string> SetCheatsAsync(Process game, CheatSettings settings) => CheatCommandAsync(game,settings.Command);
+    internal static Task<string> DisableCamerasAsync(Process game) => CheatCommandAsync(game,"--cameras-disable");
     internal static Task<string> PingCheatsAsync(Process game) => CheatCommandAsync(game,"--cheats-ping");
 
     private static async Task<string> CheatCommandAsync(Process game,string command)
@@ -76,7 +77,7 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if(await RunHelperAsync("--version")!="SCTravelHost:0.19.0:protocol17")
+            if(await RunHelperAsync("--version")!="SCTravelHost:0.20.0:protocol18")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             return await RunHelperAsync(game.Id.ToString(),command);
         }
@@ -107,7 +108,7 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if(await RunHelperAsync("--version")!="SCTravelHost:0.19.0:protocol17")
+            if(await RunHelperAsync("--version")!="SCTravelHost:0.20.0:protocol18")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             await GameWindowFocus.PrepareAsync(game.MainWindowHandle);
             var reply=await RunHelperAsync(game.Id.ToString(),command);

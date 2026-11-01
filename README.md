@@ -6,7 +6,7 @@ Windows trainer for the original Tom Clancy's Splinter Cell on Steam, built with
 
 
 
-**Trainer:** v0.14.0 prototype
+**Trainer:** v0.16.0 prototype
 
 **Supported Steam build:** 252083 (App ID 13560)
 
@@ -405,7 +405,7 @@ and quickload returned to gameplay without a GPF. Regression checks also cover
 activity eligibility for normal versus unconscious/dead/removed/special states.
 
 
-## Map NPCs and position editing (v0.14.0)
+## Map NPCs and position editing (v0.16.0)
 
 The manager automatically discovers EAIPawn instances in the current loaded
 mission, including guards, civilians, bodies and scripted characters. Each row
@@ -476,4 +476,19 @@ Condition changes in the overlay return after the game accepts the request; they
 
 Overlay regression checks cover separate named map and spawned rosters, map-removal protection, browsing another NPC's condition submenu during an outstanding edit, preserving the original edit target, and returning directly from the map roster to the main menu.
 
-Live v0.14.0 verification in Tbilisi: the named map roster populated and keyboard navigation scrolled to its bottom; a map NPC editor opened with removal disabled. A temporary spawned guard was knocked out, revived through the overlay, and Back navigation was accepted after the revival request. The test guard was removed afterward; the game remained running without a GPF. No map NPC properties were changed during this verification.
+Live v0.16.0 verification in Tbilisi: the named map roster populated and keyboard navigation scrolled to its bottom; a map NPC editor opened with removal disabled. A temporary spawned guard was knocked out, revived through the overlay, and Back navigation was accepted after the revival request. The test guard was removed afterward; the game remained running without a GPF. No map NPC properties were changed during this verification.
+
+## Overlay level loading (v0.15.0)
+
+**F6 → Load level → mission → map section → confirm** loads an installed map through the same safe loader as the desktop window. Cancel is selected first in the confirmation page. Loading is still restricted to the game's main menu; active-mission travel remains blocked. The user confirmed successful live loading through the overlay.
+
+## Remaining desktop controls in the overlay (v0.16.0)
+
+- **Movement speed** opens a submenu with an enable toggle and 0.5x, 1x, 1.5x, 2x and 3x multipliers. Choosing a multiplier while disabled stores it; choosing one while enabled updates the existing speed cheat without changing other options.
+- Each NPC editor now includes **Rename**, **Detailed stats**, and a **Position** submenu with X/Y/Z drafts, Apply XYZ position, Use current position, In front of Sam and Move to Sam. Draft edits do not move the NPC until Apply is selected. Rename changes the overlay display label for this process/session, not the actor's engine name.
+- **Health → Custom health** accepts any whole value from 1 to 100 as well as the existing presets. **Detailed stats** shows origin/type, engine instance name, health, condition, activity, movement, distance, weapon, XYZ, pawn/AI states, target and controller attachment.
+- **Trainer tools / About / Exit** contains game detection refresh, connection testing, trainer version, supported Steam build/App ID, and an exit confirmation. Exit uses the existing close/cheat-restoration handler and leaves the game running.
+
+For text fields, press Enter to edit, type the value, then Enter to apply or Escape to cancel. The initial value is selected so typing replaces it. Ctrl+A selects all; Left/Right, Home/End, Backspace and Delete edit the draft. Use a dot for decimal coordinates. F6 closes and cancels a draft; switching away from the game also cancels it. While editing, typing is consumed by the overlay instead of reaching gameplay. The trainer process must remain running to provide the overlay.
+
+Build and automated input/NPC regression checks are provided. New live keyboard-entry, utility, speed-selection and coordinate-editing checks are left for the user's requested gameplay test.

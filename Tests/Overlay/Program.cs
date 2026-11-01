@@ -77,12 +77,65 @@ pendingAction.SetResult("Updated");await updating;
 Check(editedId==44&&!maps.Busy,"pending update keeps its original map NPC target while browsing");
 Check(maps.Back()&&maps.Back()&&!maps.Back(),"map roster opened from main returns directly to main");
 
+
+var installedMaps=new[]{new LevelMenuChoice("1_1_0Tbilisi","Police Station  /  1_1_0Tbilisi"),new LevelMenuChoice("1_1_1Tbilisi","Police Station  /  1_1_1Tbilisi"),new LevelMenuChoice("0_0_2_Training","Training  /  0_0_2_Training")};
+var levelRequests=new List<string>();var completeLoad=new TaskCompletionSource<string>();
+var levels=new LevelOverlayMenu(()=>installedMaps,l=>{levelRequests.Add(l.Map);return completeLoad.Task;});
+Check(levels.Frame.Entries.Count(e=>e.Key.StartsWith("mission:"))==2,"installed levels grouped by mission");
+await Reject(()=>levels.ActivateAsync("load:1_1_0Tbilisi"),"direct load without selection and confirmation rejected");
+await levels.ActivateAsync("mission:Police Station");
+Check(levels.Frame.Entries.Count(e=>e.Key.StartsWith("level:"))==2,"mission submenu shows its installed map sections");
+await Reject(()=>levels.ActivateAsync("level:0_0_2_Training"),"map from a different mission cannot be selected");
+await levels.ActivateAsync("level:1_1_1Tbilisi");
+Check(levels.Frame.Entries[0].Key=="level-cancel"&&levelRequests.Count==0,"load confirmation defaults to cancel and does not send travel");
+await levels.ActivateAsync("level-cancel");Check(levelRequests.Count==0,"cancelled level selection never requests travel");
+await levels.ActivateAsync("level:1_1_1Tbilisi");
+var loading=levels.ActivateAsync("load:1_1_1Tbilisi");
+Check(levels.Busy&&!levels.Frame.Entries.First(e=>e.Key.StartsWith("load:")).Available,"confirmed map load disables duplicate requests");
+await levels.ActivateAsync("load:1_1_1Tbilisi");Check(levelRequests.SequenceEqual(new[]{"1_1_1Tbilisi"}),"confirmed level identity used exactly once");
+Check(levels.Back()&&levels.Back()&&!levels.Back(),"back works during loading and returns through mission list to main");
+completeLoad.SetResult("Loaded");await loading;Check(!levels.Busy,"loading state clears after completion");
+var blockedLevels=new LevelOverlayMenu(()=>installedMaps,_=>throw new InvalidOperationException("Return to the main menu"));
+await blockedLevels.ActivateAsync("mission:Training");await blockedLevels.ActivateAsync("level:0_0_2_Training");
+await Reject(()=>blockedLevels.ActivateAsync("load:0_0_2_Training"),"shared loader refusal is surfaced rather than bypassed");
+Check(!blockedLevels.Busy,"failed level load clears busy state");
+Check(!new LevelOverlayMenu(()=>Array.Empty<LevelMenuChoice>(),_=>Task.FromResult("")).Frame.Entries[0].Available,"empty map installation cannot request travel");
+
+
+void InvalidInput(GameMenuInput descriptor,string label){try{new OverlayTextEditor("",descriptor).Value();}catch(ArgumentException){Console.WriteLine("PASS "+label);return;}throw new Exception(label);}
+var edit=new OverlayTextEditor("name",new("Name","Guard",MenuInputKind.Name));edit.Insert("Alpha: One");Check(edit.Value()=="Alpha: One","typing replaces initially selected input and supports names containing punctuation");
+edit.Home();edit.Delete();edit.End();edit.Backspace();Check(edit.Value()=="lpha: On","input supports caret navigation, delete and backspace");
+edit.SelectAll();edit.Insert("New");Check(edit.Value()=="New","select all replaces the current draft");
+InvalidInput(new("Health","0",MenuInputKind.Health),"zero health rejected by custom editor");
+InvalidInput(new("Health","101",MenuInputKind.Health),"health above 100 rejected by custom editor");
+InvalidInput(new("X","NaN",MenuInputKind.Coordinate),"nonfinite coordinate rejected by custom editor");
+InvalidInput(new("X","1000001",MenuInputKind.Coordinate),"out-of-range coordinate rejected by custom editor");
+InvalidInput(new("Name","   ",MenuInputKind.Name),"blank display name rejected");
+Check(new OverlayTextEditor("",new("X","-12.75",MenuInputKind.Coordinate)).Value()=="-12.75","signed decimal coordinates accepted");
+var editSnapshots=new[]{Guard(71) with {X=10,Y=20,Z=30},Guard(72)};
+var editCalls=new List<(string Action,uint Id,int Hp)>();var positionCalls=new List<(uint Id,NpcPosition Position)>();
+using var editable=new NpcOverlayMenu(()=>Process.GetCurrentProcess(),_=>Task.FromResult<NpcSnapshot[]?>(editSnapshots),(_,act,id,hp,c,a)=>{editCalls.Add((act,id,hp));return Task.FromResult("Updated");},(_,id,position)=>{positionCalls.Add((id,position));return Task.FromResult("Moved");});
+await editable.RefreshAsync(true);await editable.ActivateAsync("roster");await editable.ActivateAsync(Key(71));
+await editable.ActivateAsync($"rename:{Environment.ProcessId}:71:"+Uri.EscapeDataString("Alpha: One"));
+Check(editable.Frame.Title.StartsWith("Alpha: One")&&editCalls.Count==0,"renaming updates overlay label without modifying the game actor");
+await editable.ActivateAsync($"custom-health:{Environment.ProcessId}:71:63");Check(editCalls[^1]==("health",71,63),"custom health preserves selected actor ID and exact requested value");
+await editable.ActivateAsync("position-menu");await editable.ActivateAsync($"coord:{Environment.ProcessId}:71:X:-123.5");
+Check(positionCalls.Count==0,"editing coordinates only changes the draft");
+editSnapshots[0]=editSnapshots[0] with {X=99};await editable.RefreshAsync(true);await editable.ActivateAsync("apply-position");
+Check(positionCalls[^1]==(71,new NpcPosition(-123.5f,20,30)),"live position updates do not overwrite an edited coordinate draft");
+await editable.ActivateAsync("use-current");await editable.ActivateAsync("apply-position");
+Check(positionCalls[^1].Position.X==99,"use current explicitly refreshes the coordinate draft");
+await editable.ActivateAsync("to-sam");Check(editCalls[^1].Action=="to-sam"&&editCalls[^1].Id==71,"Move to Sam forwards selected stable actor ID");
+await editable.ActivateAsync("details");Check(editable.Frame.Entries.Any(e=>e.Label.StartsWith("Weapon:"))&&editable.Frame.Entries.Any(e=>e.Label.StartsWith("AI state:"))&&editable.Frame.Entries.Any(e=>e.Label.StartsWith("Target:")),"detailed NPC stats include weapon, AI state and target");
+await editable.ActivateAsync(Key(72));await editable.ActivateAsync($"custom-health:{Environment.ProcessId}:71:37");
+Check(editCalls[^1]==("health",71,37),"captured text input cannot accidentally edit the newly selected NPC");
+
 namespace SCTrainer {
- internal sealed record GameMenuEntry(string Label,bool On,bool Available,string Key,string? Value=null,bool Toggle=true,bool Navigation=false);
+ internal sealed record GameMenuEntry(string Label,bool On,bool Available,string Key,string? Value=null,bool Toggle=true,bool Navigation=false,GameMenuInput? Input=null);
  internal sealed record GameMenuFrame(string Key,string Title,GameMenuEntry[] Entries);
  internal static class DirectLevelLoader {
   public static void ValidateGame(Process game)=>throw new Exception("Unexpected real game validation in test");
   public static Task<NpcSnapshot[]?> ReadNpcsAsync(Process game)=>throw new Exception("Unexpected real read in test");
-  public static Task<string> NpcActionAsync(Process game,string action,uint id=0,int hp=100,NpcConditionEdit? condition=null,NpcActivityEdit? activity=null,bool waitForCompletion=true)=>throw new Exception("Unexpected real action in test");
+  public static Task<string> NpcActionAsync(Process game,string action,uint id=0,int hp=100,NpcConditionEdit? condition=null,NpcActivityEdit? activity=null,NpcPosition? position=null,bool waitForCompletion=true)=>throw new Exception("Unexpected real action in test");
  }
 }

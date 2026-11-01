@@ -1,25 +1,33 @@
 using System.Diagnostics;
+using System.Globalization;
 namespace SCTrainer;
 
 // Stable actor IDs are used for every action; list positions never identify an NPC.
 internal sealed class NpcOverlayMenu : IDisposable
 {
+    private readonly Func<Process,uint,NpcPosition,Task<string>> _positionAction;
+    private readonly Dictionary<uint,string> _names=new();
+    private readonly Dictionary<uint,NpcPosition> _positions=new();
     private readonly Func<Process> _openGame;
     private readonly Func<Process,Task<NpcSnapshot[]?>> _read;
     private readonly Func<Process,string,uint,int,NpcConditionEdit?,NpcActivityEdit?,Task<string>> _action;
-    public NpcOverlayMenu(Func<Process>? openGame=null,Func<Process,Task<NpcSnapshot[]?>>? read=null,Func<Process,string,uint,int,NpcConditionEdit?,NpcActivityEdit?,Task<string>>? action=null)
+    public NpcOverlayMenu(Func<Process>? openGame=null,Func<Process,Task<NpcSnapshot[]?>>? read=null,Func<Process,string,uint,int,NpcConditionEdit?,NpcActivityEdit?,Task<string>>? action=null,Func<Process,uint,NpcPosition,Task<string>>? positionAction=null)
     {
+        _positionAction=positionAction??((game,id,position)=>DirectLevelLoader.NpcActionAsync(game,"position",id,position:position));
         _openGame=openGame??OpenGame;
         _read=read??DirectLevelLoader.ReadNpcsAsync;
         _action=action??((game,act,id,hp,condition,activity)=>DirectLevelLoader.NpcActionAsync(game,act,id,hp,condition,activity,waitForCompletion:false));
     }
-    private enum Page { Spawn, Roster, Edit, Condition, Activity, Health, RemoveAll }
+    private enum Page { Spawn, Roster, Edit, Condition, Activity, Health, Position, Details, RemoveAll }
     private Page _page;
     private bool _mapRoster,_mapRoot;
     public void OpenSpawns(){_mapRoot=false;_mapRoster=false;_page=Page.Spawn;}
     public void OpenMapRoster(){_mapRoot=true;_mapRoster=true;_page=Page.Roster;}
     private NpcSnapshot[] Spawned=>_npcs.Where(n=>n.TrainerSpawned).ToArray();
-    private string SelectedName=>Selected?.TrainerSpawned==false?(string.IsNullOrEmpty(Selected.InstanceName)?$"Map NPC {_selected}":Selected.InstanceName):$"Guard {_selected:00}";
+    private string DisplayName(NpcSnapshot npc)=>_names.TryGetValue(npc.Id,out var name)?name:npc.TrainerSpawned?$"Guard {npc.Id:00}":string.IsNullOrEmpty(npc.InstanceName)?$"Map NPC {npc.Id}":npc.InstanceName;
+    private string SelectedName=>Selected is NpcSnapshot npc?DisplayName(npc):$"NPC {_selected}";
+    private NpcPosition Draft(NpcSnapshot npc)=>_positions.TryGetValue(npc.Id,out var value)?value:npc.Position;
+    private string InputKey(string kind)=>$"{kind}:{_game?.Id??0}:{_selected}";
     private Process? _game;
     private NpcSnapshot[] _npcs=Array.Empty<NpcSnapshot>();
     private uint _selected;
@@ -48,7 +56,7 @@ internal sealed class NpcOverlayMenu : IDisposable
                 case Page.Roster:
                     title=(_mapRoster?"MAP NPCs":"SPAWNED NPCs")+(_stale?" / UPDATING":"");
                     var roster=_npcs.Where(n=>n.TrainerSpawned!=_mapRoster).ToArray();
-                    foreach(var npc in roster)rows.Add(Row($"{(npc.TrainerSpawned?$"Guard {npc.Id:00}":string.IsNullOrEmpty(npc.InstanceName)?$"Map NPC {npc.Id}":npc.InstanceName)}\n{npc.Condition} / {npc.Activity}",$"npc:{_game?.Id??0}:{npc.Id}",!_stale,navigation:true));
+                    foreach(var npc in roster)rows.Add(Row($"{DisplayName(npc)}\n{npc.Condition} / {npc.Activity}",$"npc:{_game?.Id??0}:{npc.Id}",!_stale,navigation:true));
                     if(roster.Length==0)rows.Add(Row(_stale?"Load a mission to connect":_mapRoster?"No map NPCs":"No spawned NPCs","empty",false,""));
                     break;
                 case Page.Edit:
@@ -56,7 +64,10 @@ internal sealed class NpcOverlayMenu : IDisposable
                     rows.Add(Row("Condition","condition",n is not null,n?.Condition??"--",navigation:true));
                     rows.Add(Row("Activity","activity",n is not null,n?.Activity??"--",navigation:true));
                     rows.Add(Row("Health","health",n is not null,n is null?"--":$"{n.Health} HP",navigation:true));
+                    rows.Add(Row("Position","position-menu",n is not null,navigation:true));
                     rows.Add(Row("Move in front of Sam","front",ready&&n?.CanEditPosition==true));
+                    rows.Add(new("Rename",false,n is not null&&!Busy,InputKey("rename"),null,false,false,new("NPC display name",SelectedName,MenuInputKind.Name)));
+                    rows.Add(Row("Detailed stats","details",n is not null,navigation:true));
                     rows.Add(Row("Remove this NPC","remove",ready&&n?.CanRemove==true));
                     break;
                 case Page.Condition:
@@ -70,7 +81,26 @@ internal sealed class NpcOverlayMenu : IDisposable
                     break;
                 case Page.Health:
                     title=$"{SelectedName} / HEALTH";
+                    rows.Add(new("Custom health (1–100)",false,ready&&n?.CanEditHealth==true,InputKey("custom-health"),null,false,false,new("NPC health",(n?.Health??100).ToString(CultureInfo.InvariantCulture),MenuInputKind.Health,3)));
                     foreach(int hp in new[]{100,75,50,25,1})rows.Add(Row($"Set health to {hp}",$"health:{hp}",ready&&n?.CanEditHealth==true));
+                    break;
+                case Page.Position:
+                    title=$"{SelectedName} / POSITION";
+                    if(n is not null){
+                        var draft=Draft(n);
+                        foreach(var axis in new[]{("X",draft.X),("Y",draft.Y),("Z",draft.Z)})rows.Add(new($"{axis.Item1}: {axis.Item2:0.###}",false,ready&&n.CanEditPosition,InputKey("coord")+":"+axis.Item1,null,false,false,new($"Position {axis.Item1}",axis.Item2.ToString("0.###",CultureInfo.InvariantCulture),MenuInputKind.Coordinate,24)));
+                        rows.Add(Row("Apply XYZ position","apply-position",ready&&n.CanEditPosition));
+                        rows.Add(Row("Use current position","use-current",!_stale));
+                        rows.Add(Row("In front of Sam","front",ready&&n.CanEditPosition));
+                        rows.Add(Row("Move to Sam","to-sam",ready&&n.CanEditPosition));
+                    }
+                    break;
+                case Page.Details:
+                    title=$"{SelectedName} / STATS";
+                    if(n is not null){
+                        string[] stats={n.Origin+" / "+n.Type,"Instance: "+n.InstanceName,$"Health: {n.Health} / 100","Condition: "+n.Condition,"Activity: "+n.Activity,"Movement: "+n.Movement,$"Distance: {n.Distance:0.0} m","Weapon: "+n.Weapon,$"XYZ: {n.X:0.###}, {n.Y:0.###}, {n.Z:0.###}","Pawn state: "+n.PawnState,"AI state: "+n.AiState,"Target: "+n.Target,"Controller: "+(n.Controller?"Attached":"None")};
+                        for(int i=0;i<stats.Length;++i)rows.Add(Row(stats[i],"stat:"+i,false,""));
+                    }
                     break;
                 case Page.RemoveAll:
                     title="REMOVE ALL SPAWNED NPCs?";
@@ -91,7 +121,7 @@ internal sealed class NpcOverlayMenu : IDisposable
     private Process Game()
     {
         if(_game is not null&&!_game.HasExited)return _game;
-        _game?.Dispose();_game=null;_npcs=Array.Empty<NpcSnapshot>();_stale=true;_selected=0;_selectedPid=0;
+        _game?.Dispose();_game=null;_names.Clear();_positions.Clear();_npcs=Array.Empty<NpcSnapshot>();_stale=true;_selected=0;_selectedPid=0;
         return _game=_openGame();
     }
     private static Process OpenGame()
@@ -113,7 +143,7 @@ internal sealed class NpcOverlayMenu : IDisposable
             _npcs=snapshot.Where(n=>n.Present).OrderBy(n=>n.Id).ToArray();_stale=false;
             if(_selected!=0&&!_npcs.Any(n=>n.Id==_selected)){
                 _selected=0;_selectedPid=0;
-                if(_page is Page.Edit or Page.Condition or Page.Activity or Page.Health)_page=Page.Roster;
+                if(_page is not (Page.Spawn or Page.Roster or Page.RemoveAll))_page=Page.Roster;
             }
         }
         catch{_stale=true;throw;}
@@ -130,11 +160,35 @@ internal sealed class NpcOverlayMenu : IDisposable
             if(parts.Length!=3||!int.TryParse(parts[1],out int pid)||!uint.TryParse(parts[2],out uint id)||_game?.Id!=pid||!_npcs.Any(n=>n.Id==id))throw new InvalidOperationException("That NPC is no longer available.");
             _selected=id;_selectedPid=pid;_page=Page.Edit;return "";
         }
+        if(key=="position-menu"){_page=Page.Position;return "Draft coordinates stay unchanged during live updates. Apply XYZ to move the NPC.";}
+        if(key=="details"){_page=Page.Details;return _stale?"Values may be stale.":"Live NPC details.";}
+        if(key=="use-current"){
+            if(_stale||Selected is null)throw new InvalidOperationException("A current NPC snapshot is required.");
+            _positions[_selected]=Selected.Position;return "Current coordinates copied to the position draft.";
+        }
+        int? inputPid=null;uint? inputId=null;
+        if(key.StartsWith("rename:")||key.StartsWith("custom-health:")||key.StartsWith("coord:")){
+            var parts=key.Split(':');bool coordinate=parts[0]=="coord";
+            if(parts.Length!=(coordinate?5:4)||!int.TryParse(parts[1],out int pid)||!uint.TryParse(parts[2],out uint id)||_game?.Id!=pid||!_npcs.Any(n=>n.Id==id))throw new InvalidOperationException("The edited NPC is no longer present.");
+            string value=Uri.UnescapeDataString(parts[^1]);
+            if(parts[0]=="rename"){
+                var validated=new OverlayTextEditor("",new("",value,MenuInputKind.Name)).Value();
+                _names[id]=validated;return "Display name changed for this overlay session.";
+            }
+            if(coordinate){
+                float number=float.Parse(new OverlayTextEditor("",new("",value,MenuInputKind.Coordinate)).Value(),CultureInfo.InvariantCulture);
+                var npc=_npcs.First(n=>n.Id==id);var draft=Draft(npc);
+                _positions[id]=parts[3] switch {"X"=>draft with {X=number},"Y"=>draft with {Y=number},"Z"=>draft with {Z=number},_=>throw new ArgumentException("Unknown coordinate axis.")};
+                return "Coordinate draft updated. Select Apply XYZ position to move the NPC.";
+            }
+            string health=new OverlayTextEditor("",new("",value,MenuInputKind.Health)).Value();inputPid=pid;inputId=id;key="health:"+health;
+        }
         if(key is "condition" or "activity" or "health"){
             _page=key=="condition"?Page.Condition:key=="activity"?Page.Activity:Page.Health;return "";
         }
         if(Busy)return "An NPC update is completing; you can keep browsing.";
-        uint targetId=_selected;int targetPid=_selectedPid;
+        uint targetId=inputId??_selected;int targetPid=inputPid??_selectedPid;
+        NpcPosition? position=key=="apply-position"&&Selected is not null?Draft(Selected):null;
         Busy=true;
         try {
             // Stop new polling while this action waits for the in-flight snapshot.
@@ -157,6 +211,8 @@ internal sealed class NpcOverlayMenu : IDisposable
             if(targetPid!=game.Id||npc is null)throw new InvalidOperationException("The selected NPC is no longer present.");
             string reply;
             if(key=="remove"&&npc.CanRemove)reply=await _action(game,"remove",npc.Id,100,null,null);
+            else if(key=="apply-position"&&npc.CanEditPosition&&position.HasValue&&position.Value.IsValid)reply=await _positionAction(game,npc.Id,position.Value);
+            else if(key=="to-sam"&&npc.CanEditPosition)reply=await _action(game,"to-sam",npc.Id,100,null,null);
             else if(key=="front"&&npc.CanEditPosition)reply=await _action(game,"front",npc.Id,100,null,null);
             else if(key.StartsWith("condition:")&&int.TryParse(key.AsSpan(10),out int c)&&Enum.IsDefined(typeof(NpcConditionEdit),c)&&npc.CanSetCondition((NpcConditionEdit)c))reply=await _action(game,"condition",npc.Id,100,(NpcConditionEdit)c,null);
             else if(key.StartsWith("activity:")&&int.TryParse(key.AsSpan(9),out int a)&&Enum.IsDefined(typeof(NpcActivityEdit),a)&&npc.CanEditActivity)reply=await _action(game,"activity",npc.Id,100,null,(NpcActivityEdit)a);

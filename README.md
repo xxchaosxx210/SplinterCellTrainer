@@ -6,7 +6,7 @@ Windows trainer for the original Tom Clancy's Splinter Cell on Steam, built with
 
 
 
-**Trainer:** v0.19.0 prototype
+**Trainer:** v0.20.0 prototype
 
 **Supported Steam build:** 252083 (App ID 13560)
 
@@ -528,3 +528,12 @@ This is output suppression rather than a no-suspicion guarantee: guards or scrip
 The primary [ELight](https://github.com/Joshhhuaaa/EnhancedSC/blob/main/UnrealScript/Echelon/Classes/ELight.uc) and [EGamePlayObjectLight](https://github.com/Joshhhuaaa/EnhancedSC/blob/main/UnrealScript/Echelon/Classes/EGamePlayObjectLight.uc) implementations were consulted, and field owners/types, LT_None=0, and renderer cache metadata were verified read-only against the running game. Native protocol 17 separates the helper from earlier pinned versions.
 
 Validation: clean native/WPF build, native light scope/restoration policy checks, cheat flag checks and overlay/NPC regression checks. The user confirmed the quiet-lights feature works in gameplay.
+
+
+## Disable all security cameras (v0.20.0)
+
+F6 → **Disable all security cameras** → Enter. This one-shot action deactivates security cameras in the current mission, including unbreakable security cameras, and reports the count. It uses the camera's scripted `s_Deactivated` state while suppressing its disable sound and AI change notification; it does not damage or destroy cameras. Sam's camera and sticky cameras are excluded. Destroyed/jammed cameras are left alone. Already deactivated cameras are counted separately.
+
+Load a mission first. Reloading a level or later mission scripts can restore cameras; use the action again if needed. Existing alarms are not cleared. Gameplay verification is pending.
+
+Implementation reference: EnhancedSC's `EBaseCam.uc` and `ESensor.uc` (EchelonIngredient), matching the supported game's reflected classes.

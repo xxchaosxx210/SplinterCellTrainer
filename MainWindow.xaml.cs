@@ -31,8 +31,8 @@ public partial class MainWindow : Window
 
     // The former window is a hidden control host during the tray migration; it is never shown.
     public event Action? ExitRequested;
-    private bool _shutdownRunning,_shutdownApproved;
-    public bool IsBusy=>_levelLoading||_overlayNpcs.Busy||_overlayNpcs.Refreshing||_healthChanging||_cheatsChanging||_cheatRefreshBusy;
+    private bool _shutdownRunning,_shutdownApproved,_camerasChanging;
+    public bool IsBusy=>_levelLoading||_overlayNpcs.Busy||_overlayNpcs.Refreshing||_healthChanging||_cheatsChanging||_cheatRefreshBusy||_camerasChanging;
     public void StartBackground()=>StartGameMenu();
     internal TrainerStatusSnapshot Status=>new(GameStatus.Text,GameDetail.Text,MenuStatus.Text,CheatStatus.Text,HealthStatus.Text,LevelStatus.Text,
         GameStatus.Text=="Game detected",MenuStatus.Text.StartsWith("In-game menu unavailable",StringComparison.Ordinal),_shutdownRunning);
@@ -87,7 +87,7 @@ public partial class MainWindow : Window
         if(_utilityPage is not null)return ReadUtilityMenu();
         if(_showOverlayLevels&&_overlayLevels is not null)return _overlayLevels.Frame;
         if(_showOverlayNpcs)return _overlayNpcs.Frame;
-        bool ready=!_levelLoading&&!_overlayNpcs.Busy&&!_healthChanging&&!_cheatsChanging&&!_cheatRefreshBusy;
+        bool ready=!_levelLoading&&!_overlayNpcs.Busy&&!_healthChanging&&!_cheatsChanging&&!_cheatRefreshBusy&&!_camerasChanging;
         var settings=ReadCheatSettings();
         var items=new List<GameMenuEntry> {
             new("Enemy ESP",EnemyEspToggle.IsChecked==true,ready,"cheat:0"),
@@ -98,6 +98,7 @@ public partial class MainWindow : Window
             if(MenuOptions[i]==CheatOptions.MovementSpeed)items.Add(new("Movement speed",false,true,"speed-menu",settings.Options.HasFlag(CheatOptions.MovementSpeed)?$"{settings.SpeedPercent/100.0:0.##}x":"OFF",false,true));
             else items.Add(new(labels[i],settings.Options.HasFlag(MenuOptions[i]),ready,$"cheat:{i+2}"));
         }
+        items.Add(new("Disable all security cameras",false,ready,"cameras-disable",null,false));
         items.Add(new("Trainer tools / About / Exit",false,true,"tools-menu",null,false,true));
         items.Insert(0,new("Spawn NPCs",false,true,"spawns",null,false,true));
         items.Insert(1,new("Map NPCs",false,true,"map-npcs",null,false,true));
@@ -123,8 +124,9 @@ public partial class MainWindow : Window
         }
         if(key=="back"){if(!_overlayNpcs.Back())_showOverlayNpcs=false;return "";}
         if(_showOverlayNpcs){if(_levelLoading)return "Wait for level loading to finish.";return await _overlayNpcs.ActivateAsync(key);}
+        if(key=="cameras-disable")return await DisableCamerasAsync();
         if(!key.StartsWith("cheat:")||!int.TryParse(key.AsSpan(6),out int selected))return "Select an option.";
-        if(_levelLoading||_healthChanging||_cheatsChanging||_cheatRefreshBusy)return "Please wait for the current update.";
+        if(_levelLoading||_healthChanging||_cheatsChanging||_cheatRefreshBusy||_camerasChanging)return "Please wait for the current update.";
         if(selected==0){EnemyEspToggle.IsChecked=EnemyEspToggle.IsChecked!=true;return EspStatus.Text;}
         if(selected==1){await SetInfiniteHealthAsync(InfiniteHealthToggle.IsChecked!=true);return HealthStatus.Text;}
         if(selected<2||selected>=MenuOptions.Length+2)return "Select an option.";
@@ -133,9 +135,22 @@ public partial class MainWindow : Window
         return CheatStatus.Text;
     }
 
+    private async Task<string> DisableCamerasAsync()
+    {
+        if(IsBusy)return "Please wait for the current update.";
+        _camerasChanging=true;
+        var games=Process.GetProcessesByName("SplinterCell");
+        try {
+            if(games.Length!=1)throw new InvalidOperationException("Start one copy of Splinter Cell and load a mission.");
+            return MenuStatus.Text=await DirectLevelLoader.DisableCamerasAsync(games[0]);
+        }
+        catch(Exception ex) when(ex is InvalidOperationException or System.ComponentModel.Win32Exception or System.IO.IOException){return MenuStatus.Text=ex.Message;}
+        finally{foreach(var game in games)game.Dispose();_camerasChanging=false;}
+    }
+
     private GameMenuFrame ReadUtilityMenu()
     {
-        bool ready=!_levelLoading&&!_overlayNpcs.Busy&&!_overlayNpcs.Refreshing&&!_healthChanging&&!_cheatsChanging&&!_cheatRefreshBusy;
+        bool ready=!_levelLoading&&!_overlayNpcs.Busy&&!_overlayNpcs.Refreshing&&!_healthChanging&&!_cheatsChanging&&!_cheatRefreshBusy&&!_camerasChanging;
         var rows=new List<GameMenuEntry>();string title="TRAINER TOOLS";
         GameMenuEntry Row(string label,string key,bool enabled=true,bool navigation=false,string? value=null)=>new(label,false,enabled,key,value,false,navigation);
         if(_utilityPage=="speed"){
@@ -166,7 +181,7 @@ public partial class MainWindow : Window
         if(key=="about"){_utilityPage="about";return "";}
         if(key=="exit-menu"){_utilityPage="exit";return "The game will remain running.";}
         if(key=="exit-cancel"){_utilityPage="tools";return "Exit cancelled.";}
-        if(_levelLoading||_overlayNpcs.Busy||_overlayNpcs.Refreshing||_healthChanging||_cheatsChanging||_cheatRefreshBusy)return "Please wait for the current update.";
+        if(_levelLoading||_overlayNpcs.Busy||_overlayNpcs.Refreshing||_healthChanging||_cheatsChanging||_cheatRefreshBusy||_camerasChanging)return "Please wait for the current update.";
         if(key=="exit-confirm"&&_utilityPage=="exit"){
             // Uses the existing close handler, which restores active cheat sessions first.
             _ = Dispatcher.BeginInvoke(new Action(RequestExit));return "Closing trainer…";
@@ -460,7 +475,7 @@ public partial class MainWindow : Window
 
     private async Task<string> LoadOverlayLevelAsync(LevelMenuChoice level)
     {
-        if(_levelLoading||_overlayNpcs.Busy||_overlayNpcs.Refreshing||_healthChanging||_cheatsChanging||_cheatRefreshBusy)
+        if(_levelLoading||_overlayNpcs.Busy||_overlayNpcs.Refreshing||_healthChanging||_cheatsChanging||_cheatRefreshBusy||_camerasChanging)
             throw new InvalidOperationException("Wait for the current trainer update to finish.");
         if(!_levels.Any(l=>l.Map==level.Map)||!System.IO.File.Exists(System.IO.Path.Combine(GameDirectory,"maps",level.Map+".scl")))
             throw new InvalidOperationException("The selected map is no longer installed.");

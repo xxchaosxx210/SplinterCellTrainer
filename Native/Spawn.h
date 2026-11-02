@@ -14,7 +14,8 @@ static_assert(sizeof(MoveCheck)==0x38,"Supported x86 FCheckResult layout require
 static MoveCheck NewCheck(){MoveCheck c={};c.time=1;c.item=-1;return c;}
 using LineCheckFn=int (__thiscall*)(void*,MoveCheck&,void*,const Vec&,const Vec&,DWORD,Vec,void*);
 using RotateFn=int (__thiscall*)(void*,void*,Vec,Rot,MoveCheck&,int,int,int,int);
-using SpawnFn=Byte* (__thiscall*)(void*,void*,DWORD,Vec,Rot,void*,int,int,void*,void*);
+// The actor pointer BEFORE flags is the template; the actor pointer AFTER flags is the owner.
+using SpawnFn=Byte* (__thiscall*)(void* level,void* actorClass,DWORD actorName,Vec location,Rot rotation,void* actorTemplate,int noCollisionFail,int remoteOwned,void* actorOwner,void* instigator);
 using DestroyFn=int (__thiscall*)(void*,void*,int);
 using EventFn=void (__thiscall*)(void*,void*,void*,void*);
 using FindFn=void* (__thiscall*)(void*,DWORD,int);

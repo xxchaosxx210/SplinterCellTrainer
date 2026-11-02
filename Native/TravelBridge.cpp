@@ -5,9 +5,9 @@
 #include "EquipmentProtocol.h"
 
 struct Request { DWORD version; DWORD pid; HWND window; LONG result; wchar_t map[128]; };
-static constexpr DWORD Version = 26;
-static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v26";
-static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v26.%lu", pid); }
+static constexpr DWORD Version = 29;
+static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v29";
+static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v29.%lu", pid); }
 
 #ifdef BRIDGE_DLL
 #include "Cheats.h"
@@ -191,7 +191,7 @@ static BOOL CALLBACK FindWindow(HWND window, LPARAM context) {
     return TRUE;
 }
 int wmain(int argc, wchar_t** argv) {
-    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.26.1:protocol26"); return 0; }
+    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.26.4:protocol29"); return 0; }
     if (argc != 3) { puts("Expected process ID and map."); return 2; }
     Search search = { wcstoul(argv[1], nullptr, 10), nullptr };
     EnumWindows(FindWindow, reinterpret_cast<LPARAM>(&search));
@@ -254,6 +254,9 @@ int wmain(int argc, wchar_t** argv) {
         UnmapViewOfFile(equipmentData);CloseHandle(equipmentMapping);if(valid)return 0;
     }
     switch (result) {
+    case 66: puts("The game refused to add that item to Sam inventory. No grant confirmed.");return 38;
+    case 65: wprintf(L"%s\n",requestMap);return 37;
+    case 64: puts("The item was created but was not attached to Sam correctly. Inventory grant not confirmed.");return 36;
     case 62: puts("No walkable floor found at that distance. Move Sam into an open area or choose another distance.");return 34;
     case 63: puts("A wall blocks that position in front of Sam. Turn toward an open area or choose another distance.");return 35;
     case 61: wprintf(L"%s\n",requestMap);return 0;

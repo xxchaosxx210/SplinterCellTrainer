@@ -6,7 +6,7 @@ Windows trainer for the original Tom Clancy's Splinter Cell on Steam, built with
 
 
 
-**Trainer:** v0.26.1 prototype
+**Trainer:** v0.26.4 prototype
 
 **Supported Steam build:** 252083 (App ID 13560)
 
@@ -609,3 +609,18 @@ Native moves use normal engine collision checks, a world trace from Sam, and val
 Forward placement now calls the supported Engine.dll SingleLineCheck and MoveActor APIs directly rather than sending indexed native FastTrace / SetRotation functions through ProcessEvent. The previous trace never returned a usable result, rejecting every destination. Ground traces find the destination floor before collision testing, including different floor heights. Floor, wall and occupied-position failures have distinct messages, and group summaries include the first failure reason.
 
 Read-only live placement probes in Kalinatek verified a clear, collision-valid 3-metre point and a blocked 6-metre point. The probes use FarMoveActor's test flag and do not relocate NPCs. The user confirmed actual NPC relocation works in v0.26.1.
+
+
+### Equipment grant verification (v0.26.2)
+
+New equipment now uses normal local actor spawning (`bRemoteOwned=0`), matching the game's local inventory ownership, and the resulting item must be linked to Sam and his controller. After Give / Set quantity, the menu refreshes the real inventory and checks the requested capped quantity before reporting success. Missing items and unchanged quantities now produce an explicit error. At-capacity items display **At game limit** and disable Give (Wall Mines have a three-item limit). Gameplay verification is pending.
+
+
+### Equipment owner fix (v0.26.3)
+
+Creation now matches EPawn's normal inventory initialization: spawn with the controller as owner, check native CanAddItem, and call Item.Add(controller, controller, inventory). The earlier pawn-owner path could fault during item initialization. Ownership validation now expects the controller, matching existing game inventory. Native equipment exceptions identify the failing stage instead of displaying a generic map-loading error. Read-only probes verified Wall Mine and Medkit class loading; grants remain pending gameplay verification.
+
+
+### Native inventory spawn fix (v0.26.4)
+
+Captured fault evidence showed ULevel::SpawnActor was copying the player controller as an actor template. Its first actor pointer is Template and its actor pointer after the flags is Owner. Inventory creation now passes a null template and the controller in the owner argument. A shared wrapper and native regression test enforce this ABI ordering. The approved live Wall Mine grant increased Sam's actual inventory count from 1 to 2; no additional grants were issued. Diagnostic exceptions record stage/module/RVA in EquipmentFault.log beside the helper build.

@@ -16,6 +16,7 @@ public partial class MainWindow : Window
             EnemyEspToggle.IsChecked=EnemyEspToggle.IsChecked!=true;
             return EspStatus.Text;
         },()=>!IsBusy&&!_shutdownRunning);
+        _equipment.Available=()=>!_levelLoading&&!_shutdownRunning&&!_overlayNpcs.Busy&&!_healthChanging&&!_cheatsChanging&&!_cheatRefreshBusy&&!_worldActionChanging;
         _cheatControlsReady=true;
         // WPF work-area dimensions already account for Windows display scaling.
         var workArea = SystemParameters.WorkArea;
@@ -30,13 +31,13 @@ public partial class MainWindow : Window
         RefreshGameStatus();
         _timer.Tick += Timer_Tick;
         _timer.Start();
-        Closed += (_, _) => { _gameMenu?.Close(); _overlayNpcs.Dispose(); _enemyOverlay?.Close(); _timer.Stop(); _timer.Tick -= Timer_Tick; };
+        Closed += (_, _) => { _gameMenu?.Close(); _overlayNpcs.Dispose(); _equipment.Dispose(); _enemyOverlay?.Close(); _timer.Stop(); _timer.Tick -= Timer_Tick; };
     }
 
     // The former window is a hidden control host during the tray migration; it is never shown.
     public event Action? ExitRequested;
     private bool _shutdownRunning,_shutdownApproved,_worldActionChanging;
-    public bool IsBusy=>_levelLoading||_overlayNpcs.Busy||_overlayNpcs.Refreshing||_healthChanging||_cheatsChanging||_cheatRefreshBusy||_worldActionChanging;
+    public bool IsBusy=>_equipment.Busy||_equipment.Refreshing||_levelLoading||_overlayNpcs.Busy||_overlayNpcs.Refreshing||_healthChanging||_cheatsChanging||_cheatRefreshBusy||_worldActionChanging;
     public void StartBackground()=>StartGameMenu();
     internal TrainerStatusSnapshot Status=>new(GameStatus.Text,GameDetail.Text,MenuStatus.Text,CheatStatus.Text,HealthStatus.Text,LevelStatus.Text,
         GameStatus.Text=="Game detected",MenuStatus.Text.StartsWith("In-game menu unavailable",StringComparison.Ordinal),_shutdownRunning);
@@ -44,7 +45,7 @@ public partial class MainWindow : Window
     {
         if(_shutdownRunning||IsBusy)return MenuStatus.Text="Wait for the current trainer update to finish.";
         _gameMenu?.Close();_gameMenu=null;
-        _showOverlayLevels=false;_showOverlayNpcs=false;_utilityPage=null;
+        _showOverlayLevels=false;_showOverlayNpcs=false;_showEquipment=false;_utilityPage=null;
         StartGameMenu();return MenuStatus.Text;
     }
     public async Task<bool> ShutdownTrainerAsync()
@@ -69,6 +70,8 @@ public partial class MainWindow : Window
 
     private GameMenuOverlay? _gameMenu;
     private readonly NpcOverlayMenu _overlayNpcs=new();
+    private readonly EquipmentMenu _equipment=new();
+    private bool _showEquipment;
     private bool _showOverlayNpcs,_showOverlayLevels,_levelLoading;
     private string? _utilityPage;
     private LevelOverlayMenu? _overlayLevels;
@@ -79,7 +82,7 @@ public partial class MainWindow : Window
         if(_gameMenu is not null)return;
         try {
             _overlayLevels=new LevelOverlayMenu(()=>_levels.Select(l=>new LevelMenuChoice(l.Map,l.Label)).ToArray(),LoadOverlayLevelAsync);
-            _gameMenu=new GameMenuOverlay(ReadGameMenu,ToggleGameMenuAsync,()=>_showOverlayNpcs&&!_levelLoading?_overlayNpcs.RefreshAsync():Task.CompletedTask);
+            _gameMenu=new GameMenuOverlay(ReadGameMenu,ToggleGameMenuAsync,()=>_levelLoading?Task.CompletedTask:_showEquipment?_equipment.RefreshAsync():_showOverlayNpcs?_overlayNpcs.RefreshAsync():Task.CompletedTask);
             _gameMenu.Show();
             MenuStatus.Text="In-game menu: F6 to open / close; arrows to select; Enter to toggle.";
         }
@@ -88,6 +91,7 @@ public partial class MainWindow : Window
     private GameMenuFrame ReadGameMenu()
     {
         if(_shutdownRunning)return new("stopping","TRAINER STOPPING",new[]{new GameMenuEntry("Restoring active cheats…",false,false,"stopping",null,false)});
+        if(_showEquipment)return _equipment.Frame;
         if(_utilityPage is not null)return ReadUtilityMenu();
         if(_showOverlayLevels&&_overlayLevels is not null)return _overlayLevels.Frame;
         if(_showOverlayNpcs)return _overlayNpcs.Frame;
@@ -104,12 +108,19 @@ public partial class MainWindow : Window
         items.Add(new("Enemies fight each other (30s)",false,ready,"guards-fight",null,false));
         items.Add(new("Disable all security cameras",false,ready,"cameras-disable",null,false));
         items.Add(new("Trainer tools / About / Exit",false,true,"tools-menu",null,false,true));
+        items.Insert(0,new("Sam Equipment",false,true,"equipment",null,false,true));
         items.Insert(0,new("NPC Manager",false,true,"npcs",null,false,true));
         items.Insert(0,new("Load level",false,true,"levels",null,false,true));
         return new("main","TRAINER MENU",items.ToArray());
     }
     private async Task<string> ToggleGameMenuAsync(string key)
     {
+        if(key=="equipment"){
+            _showEquipment=true;_showOverlayNpcs=false;_showOverlayLevels=false;_utilityPage=null;
+            _equipment.Open();await _equipment.RefreshAsync(true);return "Give items, set quantities, or select equipment.";
+        }
+        if(key=="back"&&_showEquipment){if(!_equipment.Back())_showEquipment=false;return "";}
+        if(_showEquipment)return await _equipment.ActivateAsync(key);
         if(key is "speed-menu" or "tools-menu"){
             _showOverlayNpcs=false;_showOverlayLevels=false;_utilityPage=key=="speed-menu"?"speed":"tools";return "";
         }

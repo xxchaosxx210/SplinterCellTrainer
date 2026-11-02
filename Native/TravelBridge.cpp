@@ -2,17 +2,19 @@
 #include <cstdio>
 #include <cwchar>
 #include "NpcProtocol.h"
+#include "EquipmentProtocol.h"
 
 struct Request { DWORD version; DWORD pid; HWND window; LONG result; wchar_t map[128]; };
-static constexpr DWORD Version = 22;
-static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v22";
-static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v22.%lu", pid); }
+static constexpr DWORD Version = 23;
+static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v23";
+static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v23.%lu", pid); }
 
 #ifdef BRIDGE_DLL
 #include "Cheats.h"
 #include "Spawn.h"
 #include "Cameras.h"
 #include "Fighting.h"
+#include "Equipment.h"
 #ifdef SC_TRAVEL_DIAGNOSTICS
 static wchar_t faultPath[MAX_PATH];
 static LONG faultCount = 0;
@@ -98,6 +100,7 @@ static void Handle(Request* r) {
         if (TrainerSpawn::SafeRequest(r, viewport, core, engine, objects)) return;
         if (TrainerCameras::Handle(r, viewport, core, objects)) return;
         if (TrainerFighting::Handle(r, viewport, core, objects)) return;
+        if (TrainerEquipment::Handle(r, viewport, core, engine, objects)) return;
         if (!wcscmp(r->map, L"--health-on") || !wcscmp(r->map, L"--health-off")) {
             bool enable = !wcscmp(r->map, L"--health-on");
             auto getName = reinterpret_cast<const wchar_t* (__thiscall*)(void*)>(GetProcAddress(core, "?GetName@UObject@@QBEPBGXZ"));
@@ -186,7 +189,7 @@ static BOOL CALLBACK FindWindow(HWND window, LPARAM context) {
     return TRUE;
 }
 int wmain(int argc, wchar_t** argv) {
-    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.23.1:protocol22"); return 0; }
+    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.24.0:protocol23"); return 0; }
     if (argc != 3) { puts("Expected process ID and map."); return 2; }
     Search search = { wcstoul(argv[1], nullptr, 10), nullptr };
     EnumWindows(FindWindow, reinterpret_cast<LPARAM>(&search));
@@ -213,6 +216,14 @@ int wmain(int argc, wchar_t** argv) {
         npcData=static_cast<NpcSnapshot*>(MapViewOfFile(npcMapping,FILE_MAP_ALL_ACCESS,0,0,sizeof(NpcSnapshot)));
         if(!npcData){CloseHandle(npcMapping);return 4;}
     }
+    HANDLE equipmentMapping=nullptr;EquipmentSnapshot* equipmentData=nullptr;
+    if(!wcscmp(argv[2],L"--equipment-list")){
+        wchar_t key[96];EquipmentSnapshotName(key,search.pid);
+        equipmentMapping=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,sizeof(EquipmentSnapshot),key);
+        if(!equipmentMapping||GetLastError()==ERROR_ALREADY_EXISTS){puts("Equipment snapshot busy.");return 4;}
+        equipmentData=static_cast<EquipmentSnapshot*>(MapViewOfFile(equipmentMapping,FILE_MAP_ALL_ACCESS,0,0,sizeof(EquipmentSnapshot)));
+        if(!equipmentData){CloseHandle(equipmentMapping);return 4;}
+    }
     auto thread = GetWindowThreadProcessId(search.window, nullptr);
     auto hook = SetWindowsHookExW(WH_CALLWNDPROC, proc, dll, thread);
     if (!hook) { printf("Could not connect to game thread (Windows error %lu).\n", GetLastError()); return 5; }
@@ -235,7 +246,17 @@ int wmain(int argc, wchar_t** argv) {
         UnmapViewOfFile(npcData);CloseHandle(npcMapping);
         if(valid)return 0;
     }
+    if(equipmentData){
+        bool valid=result==50&&equipmentData->version==1&&equipmentData->count==17;
+        if(valid){puts("EQUIPMENT:1");for(auto& e:equipmentData->entries)printf("%lu|%lu|%d|%d\n",e.id,e.owned,e.quantity,e.maximum);}
+        UnmapViewOfFile(equipmentData);CloseHandle(equipmentMapping);if(valid)return 0;
+    }
     switch (result) {
+    case 51: wprintf(L"%s\n",requestMap);return 0;
+    case 52: puts("Equipment operation is unavailable for this item or game script.");return 28;
+    case 53: puts("Give this item to Sam before selecting it.");return 29;
+    case 54: puts("Give Sam the SC-20K before selecting launcher ammunition.");return 30;
+    case 56: puts("Sam must be standing normally, outside menus and interactions, to change equipment.");return 31;
     case 1: puts("Map travel queued on the game thread."); return 0;
     case 11: wprintf(L"STATE:%s\n", requestMap); return 0;
     case 12: puts("STATE:loading"); return 0;

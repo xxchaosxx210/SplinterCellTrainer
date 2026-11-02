@@ -1,6 +1,6 @@
 using System.Globalization;
 namespace SCTrainer;
-internal enum MenuInputKind { Name, Health, Coordinate }
+internal enum MenuInputKind { Name, Health, Coordinate, Quantity }
 internal sealed record GameMenuInput(string Label,string Initial,MenuInputKind Kind,int MaxLength=32);
 internal sealed class OverlayTextEditor
 {
@@ -22,6 +22,7 @@ internal sealed class OverlayTextEditor
     {
         string value=Text.Trim();
         if(Input.Kind==MenuInputKind.Name){if(value.Length==0||value.Length>32||value.Any(char.IsControl))throw new ArgumentException("Enter a name from 1 to 32 characters.");}
+        else if(Input.Kind==MenuInputKind.Quantity){if(!int.TryParse(value,NumberStyles.None,CultureInfo.InvariantCulture,out int count)||count is <1 or >999)throw new ArgumentException("Quantity must be a whole number from 1 to 999.");}
         else if(Input.Kind==MenuInputKind.Health){if(!int.TryParse(value,NumberStyles.None,CultureInfo.InvariantCulture,out int hp)||hp is <1 or >100)throw new ArgumentException("Health must be a whole number from 1 to 100.");}
         else if(!float.TryParse(value,NumberStyles.Float,CultureInfo.InvariantCulture,out float coordinate)||!float.IsFinite(coordinate)||Math.Abs(coordinate)>1000000)throw new ArgumentException("Use a finite coordinate between -1000000 and 1000000; use a decimal point.");
         return value;

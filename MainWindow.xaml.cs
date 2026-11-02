@@ -101,8 +101,7 @@ public partial class MainWindow : Window
         items.Add(new("Enemies fight each other (30s)",false,ready,"guards-fight",null,false));
         items.Add(new("Disable all security cameras",false,ready,"cameras-disable",null,false));
         items.Add(new("Trainer tools / About / Exit",false,true,"tools-menu",null,false,true));
-        items.Insert(0,new("Spawn NPCs",false,true,"spawns",null,false,true));
-        items.Insert(1,new("Map NPCs",false,true,"map-npcs",null,false,true));
+        items.Insert(0,new("NPC Manager",false,true,"npcs",null,false,true));
         items.Insert(0,new("Load level",false,true,"levels",null,false,true));
         return new("main","TRAINER MENU",items.ToArray());
     }
@@ -118,9 +117,9 @@ public partial class MainWindow : Window
         }
         if(key=="back"&&_showOverlayLevels){if(!_overlayLevels!.Back())_showOverlayLevels=false;return "";}
         if(_showOverlayLevels)return await _overlayLevels!.ActivateAsync(key);
-        if(key is "spawns" or "map-npcs"){
+        if(key=="npcs"){
             _showOverlayLevels=false;_showOverlayNpcs=true;
-            if(key=="spawns")_overlayNpcs.OpenSpawns();else _overlayNpcs.OpenMapRoster();
+            _overlayNpcs.OpenManager();
             await _overlayNpcs.RefreshAsync();return "";
         }
         if(key=="back"){if(!_overlayNpcs.Back())_showOverlayNpcs=false;return "";}

@@ -58,6 +58,8 @@ public partial class MainWindow : Window
         try {
             var waiting=Stopwatch.StartNew();
             while(IsBusy){if(waiting.Elapsed>TimeSpan.FromSeconds(60)){MenuStatus.Text="An update is still running. Wait for it to finish, then retry Exit.";return false;}await Task.Delay(100);}
+            try{await _overlayNpcs.RestoreFrozenAsync();}
+            catch(Exception ex) when(ex is InvalidOperationException or System.ComponentModel.Win32Exception or System.IO.IOException){MenuStatus.Text="Could not restore frozen NPCs: "+ex.Message;return false;}
             if(!await ApplyCheatSettingsAsync(new(CheatOptions.None))||!await SetInfiniteHealthAsync(false))return false;
             _shutdownApproved=true;success=true;Close();return true;
         }
@@ -562,7 +564,7 @@ public partial class MainWindow : Window
         { LevelStatus.Text = ex.Message; }
         finally { TestConnectionButton.IsEnabled = true; foreach (var game in games) game.Dispose(); }
     }
-    private async void Timer_Tick(object? sender, EventArgs e) { RefreshGameStatus(); RefreshHealthStatus(); await RefreshCheatStatusAsync(); }
+    private async void Timer_Tick(object? sender, EventArgs e) { RefreshGameStatus(); RefreshHealthStatus(); await RefreshCheatStatusAsync(); await _overlayNpcs.PingFreezeAsync(); }
     private void Refresh_Click(object sender, RoutedEventArgs e) => RefreshGameStatus();
 
     private void RefreshGameStatus()

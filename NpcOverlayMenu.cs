@@ -6,31 +6,41 @@ namespace SCTrainer;
 internal sealed class NpcOverlayMenu : IDisposable
 {
     private readonly Func<Process,uint,NpcPosition,Task<string>> _positionAction;
+    private readonly Func<Process,uint,int,int,Task<string>> _frontAction;
+    private int _moveMetres=3;
+    private Page _distanceParent=Page.Position;
     private readonly Dictionary<uint,string> _names=new();
     private readonly HashSet<uint> _globalExcluded=new();
+    private readonly HashSet<uint> _moveExcluded=new();
+    private readonly HashSet<uint> _frozenIds=new();
+    private readonly Func<Process,bool,Task<string>> _freezeControl;
+    private bool _freezePing;
     private readonly Dictionary<uint,NpcPosition> _positions=new();
     private readonly Func<Process> _openGame;
     private readonly Func<Process,Task<NpcSnapshot[]?>> _read;
     private readonly Func<Process,string,uint,int,NpcConditionEdit?,NpcActivityEdit?,Task<string>> _action;
-    public NpcOverlayMenu(Func<Process>? openGame=null,Func<Process,Task<NpcSnapshot[]?>>? read=null,Func<Process,string,uint,int,NpcConditionEdit?,NpcActivityEdit?,Task<string>>? action=null,Func<Process,uint,NpcPosition,Task<string>>? positionAction=null)
+    public NpcOverlayMenu(Func<Process>? openGame=null,Func<Process,Task<NpcSnapshot[]?>>? read=null,Func<Process,string,uint,int,NpcConditionEdit?,NpcActivityEdit?,Task<string>>? action=null,Func<Process,uint,NpcPosition,Task<string>>? positionAction=null,Func<Process,bool,Task<string>>? freezeControl=null,Func<Process,uint,int,int,Task<string>>? frontAction=null)
     {
+        _freezeControl=freezeControl??DirectLevelLoader.FreezeControlAsync;
         _positionAction=positionAction??((game,id,position)=>DirectLevelLoader.NpcActionAsync(game,"position",id,position:position));
         _openGame=openGame??OpenGame;
         _read=read??DirectLevelLoader.ReadNpcsAsync;
         _action=action??((game,act,id,hp,condition,activity)=>DirectLevelLoader.NpcActionAsync(game,act,id,hp,condition,activity,waitForCompletion:false));
+        _frontAction=frontAction??(action is null?DirectLevelLoader.MoveNpcFrontAsync:(game,id,metres,slot)=>_action(game,"front",id,metres,null,null));
     }
     private Func<bool>? _readEsp,_canToggleEsp;
     private Func<string>? _toggleEsp;
     public void ConfigureEsp(Func<bool> read,Func<string> toggle,Func<bool> available){_readEsp=read;_toggleEsp=toggle;_canToggleEsp=available;}
-    private enum Page { Spawn, Roster, Edit, Condition, Activity, Health, Position, Details, RemoveAll, GlobalCondition, GlobalActivity, GlobalConfirm, Global, Filter, Scope, Cleanup, RemoveOne }
+    private enum Page { Spawn, Roster, Edit, Condition, Activity, Health, Position, Details, RemoveAll, GlobalCondition, GlobalActivity, GlobalConfirm, Global, Filter, Scope, Cleanup, RemoveOne, MoveDistance }
     private Page _page;
-    private sealed record GlobalEdit(int Pid,uint[] Ids,NpcConditionEdit? Condition,NpcActivityEdit? Activity,string Label,Page Parent,int Token,string Scope);
+    private sealed record GlobalEdit(int Pid,uint[] Ids,NpcConditionEdit? Condition,NpcActivityEdit? Activity,string Label,Page Parent,int Token,string Scope,bool Freeze=false,bool Move=false,int Metres=3);
     private GlobalEdit? _global;
     private int _globalToken;
     private Page _globalReturnPage=Page.GlobalCondition;
     private static string ConditionLabel(NpcConditionEdit c)=>c==NpcConditionEdit.Alive?"Alive / revive":c==NpcConditionEdit.KnockedOut?"Knocked out":"Dead";
     private static readonly string[] ActivityLabels={"Idle / guard","Walk to point in front of Sam","Run to point in front of Sam","Search point in front of Sam","Alerted"};
-    private bool Eligible(NpcSnapshot n,NpcConditionEdit? condition)=>!n.ProtectedGlobal&&!_globalExcluded.Contains(n.Id)&&n.Present&&(condition.HasValue?n.CanSetCondition(condition.Value):n.CanEditActivity);
+    private bool Eligible(NpcSnapshot n,NpcConditionEdit? condition)=>!n.ProtectedGlobal&&!_globalExcluded.Contains(n.Id)&&!_frozenIds.Contains(n.Id)&&n.Present&&(condition.HasValue?n.CanSetCondition(condition.Value):n.CanEditActivity);
+    private bool CanMoveMap(NpcSnapshot n)=>!n.TrainerSpawned&&!_globalExcluded.Contains(n.Id)&&!_moveExcluded.Contains(n.Id)&&n.CanEditPosition;
     private bool GlobalPage=>_page is Page.GlobalCondition or Page.GlobalActivity or Page.GlobalConfirm;
 
     private enum NpcScope { All, Map, Spawned }
@@ -77,7 +87,7 @@ internal sealed class NpcOverlayMenu : IDisposable
                     rows.Add(Row("Filter","filter-menu",value:_filter==NpcScope.All?"All":ScopeLabel(_filter),navigation:true));
                     var roster=_npcs.Where(n=>InScope(n,_filter)).OrderBy(n=>float.IsFinite(n.Distance)&&n.Distance>=0?n.Distance:float.PositiveInfinity).ThenBy(n=>n.Id).ToArray();
                     foreach(var npc in roster)rows.Add(Row(DisplayName(npc),$"npc:{_game?.Id??0}:{npc.Id}",!_stale,
-                        (npc.ProtectedGlobal?"Protected":_globalExcluded.Contains(npc.Id)?"Excluded":npc.Condition)+
+                        (_frozenIds.Contains(npc.Id)?"Frozen":npc.ProtectedGlobal?"Protected":_globalExcluded.Contains(npc.Id)?"Excluded":npc.Condition)+
                         (float.IsFinite(npc.Distance)&&npc.Distance>=0?$" / {npc.Distance:0.0} m":" / -- m"),true));
                     if(roster.Length==0)rows.Add(Row(_stale?"Load a mission to connect":"No NPCs in this filter","empty",false,""));
                     break;
@@ -92,9 +102,13 @@ internal sealed class NpcOverlayMenu : IDisposable
                     rows.Add(Row("Scope","scope-menu",value:ScopeLabel(_scope),navigation:true));
                     rows.Add(Row("Condition","global-condition",navigation:true));
                     rows.Add(Row("Activity","global-activity",navigation:true));
-                    int available=_npcs.Count(npc=>InScope(npc,_scope)&&!npc.ProtectedGlobal&&!_globalExcluded.Contains(npc.Id)&&
+                    rows.Add(new(_frozenIds.Count>0?"Unfreeze NPCs":"Freeze NPCs",_frozenIds.Count>0,ready,"global-freeze",_frozenIds.Count>0?$"{_frozenIds.Count} frozen":null));
+                    rows.Add(Row("Move distance in front of Sam","move-distance-global",value:$"{_moveMetres} m",navigation:true));
+                    rows.Add(Row("Move all map NPCs in front of Sam","move-map-all",ready&&_npcs.Any(npc=>CanMoveMap(npc)),$"{_npcs.Count(npc=>CanMoveMap(npc))} eligible",true));
+                    int available=_npcs.Count(npc=>InScope(npc,_scope)&&!npc.ProtectedGlobal&&!_globalExcluded.Contains(npc.Id)&&!_frozenIds.Contains(npc.Id)&&
                         (npc.CanEditActivity||npc.CanSetCondition(NpcConditionEdit.Alive)));
                     int excluded=_npcs.Count(npc=>InScope(npc,_scope)&&(npc.ProtectedGlobal||_globalExcluded.Contains(npc.Id)));
+                    if(_frozenIds.Count>0)rows.Add(Row("Unfreeze before saving or editing states","freeze-info",false,""));
                     rows.Add(Row($"Eligible: {available} / Excluded: {excluded}","scope-counts",false,""));
                     break;
                 case Page.Cleanup:
@@ -120,17 +134,21 @@ internal sealed class NpcOverlayMenu : IDisposable
                     break;
                 case Page.Condition:
                     title=$"{SelectedName} / CONDITION";
-                    foreach(var c in Enum.GetValues<NpcConditionEdit>())rows.Add(Row(ConditionLabel(c),$"condition:{(int)c}",ready&&n?.CanSetCondition(c)==true));
+                    foreach(var c in Enum.GetValues<NpcConditionEdit>())rows.Add(Row(ConditionLabel(c),$"condition:{(int)c}",ready&&!_frozenIds.Contains(_selected)&&n?.CanSetCondition(c)==true));
                     break;
                 case Page.Activity:
                     title=$"{SelectedName} / ACTIVITY";
                     var activities=ActivityLabels;
-                    for(int i=0;i<activities.Length;++i)rows.Add(Row(activities[i],$"activity:{i+1}",ready&&n?.CanEditActivity==true));
+                    for(int i=0;i<activities.Length;++i)rows.Add(Row(activities[i],$"activity:{i+1}",ready&&!_frozenIds.Contains(_selected)&&n?.CanEditActivity==true));
                     break;
                 case Page.Health:
                     title=$"{SelectedName} / HEALTH";
                     rows.Add(new("Custom health (1-100)",false,ready&&n?.CanEditHealth==true,InputKey("custom-health"),null,false,false,new("NPC health",(n?.Health??100).ToString(CultureInfo.InvariantCulture),MenuInputKind.Health,3)));
                     foreach(int hp in new[]{100,75,50,25,1})rows.Add(Row($"Set health to {hp}",$"health:{hp}",ready&&n?.CanEditHealth==true));
+                    break;
+                case Page.MoveDistance:
+                    title="MOVE DISTANCE";
+                    for(int metres=3;metres<=6;++metres)rows.Add(Row($"{metres} metres","move-distance:"+metres,value:_moveMetres==metres?"Selected":"",navigation:true));
                     break;
                 case Page.Position:
                     title=$"{SelectedName} / POSITION";
@@ -139,8 +157,10 @@ internal sealed class NpcOverlayMenu : IDisposable
                         foreach(var axis in new[]{("X",draft.X),("Y",draft.Y),("Z",draft.Z)})rows.Add(new($"{axis.Item1}: {axis.Item2:0.###}",false,ready&&n.CanEditPosition,InputKey("coord")+":"+axis.Item1,null,false,false,new($"Position {axis.Item1}",axis.Item2.ToString("0.###",CultureInfo.InvariantCulture),MenuInputKind.Coordinate,24)));
                         rows.Add(Row("Apply XYZ position","apply-position",ready&&n.CanEditPosition));
                         rows.Add(Row("Use current position","use-current",!_stale));
+                        rows.Add(Row("Distance in front of Sam","move-distance-position",value:$"{_moveMetres} m",navigation:true));
                         rows.Add(Row("In front of Sam","front",ready&&n.CanEditPosition));
                         rows.Add(Row("Move to Sam","to-sam",ready&&n.CanEditPosition));
+                        if(!n.TrainerSpawned)rows.Add(new("Exclude from group moves",_moveExcluded.Contains(n.Id),!Busy,"move-exclude"));
                     }
                     break;
                 case Page.Details:
@@ -186,14 +206,14 @@ internal sealed class NpcOverlayMenu : IDisposable
         _page=_page switch {
             Page.Roster or Page.Global or Page.Cleanup=>Page.Spawn,
             Page.Filter=>Page.Roster,Page.Scope=>Page.Global,Page.RemoveAll=>Page.Cleanup,
-            Page.Edit=>Page.Roster,Page.RemoveOne=>Page.Edit,_=>Page.Edit
+            Page.Edit=>Page.Roster,Page.RemoveOne=>Page.Edit,Page.MoveDistance=>_distanceParent,_=>Page.Edit
         };
         return true;
     }
     private Process Game()
     {
         if(_game is not null&&!_game.HasExited)return _game;
-        _game?.Dispose();_game=null;_names.Clear();_globalExcluded.Clear();_positions.Clear();_npcs=Array.Empty<NpcSnapshot>();_stale=true;_selected=0;_selectedPid=0;
+        _game?.Dispose();_game=null;_names.Clear();_globalExcluded.Clear();_moveExcluded.Clear();_frozenIds.Clear();_positions.Clear();_npcs=Array.Empty<NpcSnapshot>();_stale=true;_selected=0;_selectedPid=0;
         return _game=_openGame();
     }
     private static Process OpenGame()
@@ -223,6 +243,31 @@ internal sealed class NpcOverlayMenu : IDisposable
     }
     public async Task<string> ActivateAsync(string key)
     {
+        if(key is "move-distance-global" or "move-distance-position"){
+            _distanceParent=key=="move-distance-global"?Page.Global:Page.Position;_page=Page.MoveDistance;return "Choose 3, 4, 5 or 6 metres in front of Sam.";
+        }
+        if(key.StartsWith("move-distance:")){
+            if(_page!=Page.MoveDistance||!int.TryParse(key.AsSpan(14),out int metres)||metres<3||metres>6)throw new InvalidOperationException("Move distance must be from 3 to 6 metres.");
+            _moveMetres=metres;_page=_distanceParent;return $"Move distance: {metres} metres.";
+        }
+        if(key=="move-map-all"){
+            if(Busy)return "An NPC update is completing; you can keep browsing.";
+            Busy=true;
+            try{
+                while(Refreshing){await Task.Delay(25);if(_disposed)throw new InvalidOperationException("The NPC menu has closed.");}
+                await RefreshAsync(true);var game=Game();
+                var ids=_npcs.Where(CanMoveMap).Select(n=>n.Id).ToArray();
+                if(ids.Length==0)throw new InvalidOperationException("No map NPCs can currently be moved.");
+                _global=new(game.Id,ids,null,null,$"Move map NPCs / {_moveMetres} m",Page.Global,++_globalToken,"Map (including protected NPCs)",Move:true,Metres:_moveMetres);
+                _globalReturnPage=Page.Global;_page=Page.GlobalConfirm;
+                return "Moves existing map NPCs, including mission characters. This may affect mission scripts. Leave Sam still; blocked moves are skipped.";
+            }finally{Busy=false;}
+        }
+        if(key=="move-exclude"){
+            if(Busy||Selected is null||Selected.TrainerSpawned)return "Select a map NPC outside a pending update.";
+            if(!_moveExcluded.Add(Selected.Id))_moveExcluded.Remove(Selected.Id);
+            return _moveExcluded.Contains(Selected.Id)?"NPC excluded from group moves.":"NPC included in group moves.";
+        }
         if(key=="npc-esp"){
             if(Busy||_toggleEsp is null||_canToggleEsp?.Invoke()!=true)return "Wait for the current trainer update to finish.";
             return _toggleEsp();
@@ -247,6 +292,19 @@ internal sealed class NpcOverlayMenu : IDisposable
         if(key.StartsWith("remove-confirm:")){
             if(_page!=Page.RemoveOne||key!=$"remove-confirm:{_selectedPid}:{_selected}")throw new InvalidOperationException("Confirm the selected NPC first.");
             key="remove";
+        }
+        if(key=="global-freeze"){
+            if(Busy)return "An NPC update is completing; you can keep browsing.";
+            if(_frozenIds.Count>0)return await RestoreFrozenAsync();
+            Busy=true;
+            try{
+                while(Refreshing){await Task.Delay(25);if(_disposed)throw new InvalidOperationException("The NPC menu has closed.");}
+                await RefreshAsync(true);var game=Game();
+                var ids=_npcs.Where(n=>InScope(n,_scope)&&Eligible(n,null)).Select(n=>n.Id).ToArray();
+                if(ids.Length==0)throw new InvalidOperationException("No NPCs are eligible for freezing.");
+                _global=new(game.Id,ids,null,null,"Freeze NPCs",Page.Global,++_globalToken,ScopeLabel(_scope),true);
+                _globalReturnPage=Page.Global;_page=Page.GlobalConfirm;return "Freeze the captured NPCs? Protected and excluded NPCs are skipped.";
+            }finally{Busy=false;}
         }
         if(key=="global-exclude"){
             if(Busy||Selected is null||Selected.ProtectedGlobal)return "That NPC is protected or an update is pending.";
@@ -321,6 +379,7 @@ internal sealed class NpcOverlayMenu : IDisposable
         if(Busy)return "An NPC update is completing; you can keep browsing.";
         uint targetId=inputId??_selected;int targetPid=inputPid??_selectedPid;
         NpcPosition? position=key=="apply-position"&&Selected is not null?Draft(Selected):null;
+        int moveMetres=_moveMetres;
         Busy=true;
         try {
             // Stop new polling while this action waits for the in-flight snapshot.
@@ -341,11 +400,12 @@ internal sealed class NpcOverlayMenu : IDisposable
             }
             var npc=_npcs.FirstOrDefault(n=>n.Id==targetId);
             if(targetPid!=game.Id||npc is null)throw new InvalidOperationException("The selected NPC is no longer present.");
+            if(_frozenIds.Contains(npc.Id)&&(key.StartsWith("condition:")||key.StartsWith("activity:")))throw new InvalidOperationException("Unfreeze NPCs before changing their condition or activity.");
             string reply;
             if(key=="remove"&&npc.CanRemove)reply=await _action(game,"remove",npc.Id,100,null,null);
             else if(key=="apply-position"&&npc.CanEditPosition&&position.HasValue&&position.Value.IsValid)reply=await _positionAction(game,npc.Id,position.Value);
             else if(key=="to-sam"&&npc.CanEditPosition)reply=await _action(game,"to-sam",npc.Id,100,null,null);
-            else if(key=="front"&&npc.CanEditPosition)reply=await _action(game,"front",npc.Id,100,null,null);
+            else if(key=="front"&&npc.CanEditPosition)reply=await _frontAction(game,npc.Id,moveMetres,0);
             else if(key.StartsWith("condition:")&&int.TryParse(key.AsSpan(10),out int c)&&Enum.IsDefined(typeof(NpcConditionEdit),c)&&npc.CanSetCondition((NpcConditionEdit)c))reply=await _action(game,"condition",npc.Id,100,(NpcConditionEdit)c,null);
             else if(key.StartsWith("activity:")&&int.TryParse(key.AsSpan(9),out int a)&&Enum.IsDefined(typeof(NpcActivityEdit),a)&&npc.CanEditActivity)reply=await _action(game,"activity",npc.Id,100,null,(NpcActivityEdit)a);
             else if(key.StartsWith("health:")&&int.TryParse(key.AsSpan(7),out int hp)&&hp is >=1 and <=100&&npc.CanEditHealth)reply=await _action(game,"health",npc.Id,hp,null,null);
@@ -360,21 +420,28 @@ internal sealed class NpcOverlayMenu : IDisposable
         var edit=_global;
         if(_page!=Page.GlobalConfirm||edit is null||key!=$"global-confirm:{edit.Token}")
             throw new InvalidOperationException("Select and confirm a global edit first.");
-        _global=null;Busy=true;int requested=0,skipped=0,failed=0;string? stopped=null;
+        _global=null;Busy=true;int requested=0,skipped=0,failed=0;string? stopped=null,firstFailure=null;
         try {
             while(Refreshing){await Task.Delay(25);if(_disposed)throw new InvalidOperationException("The NPC menu has closed.");}
+            int slot=0;
             foreach(uint id in edit.Ids){
+                int moveSlot=slot++;
                 if(_disposed){stopped="NPC menu closed";break;}
                 try {
                     await RefreshAsync(true);var game=Game();
                     if(game.Id!=edit.Pid){stopped="game session changed";break;}
                     var npc=_npcs.FirstOrDefault(n=>n.Id==id);
-                    if(npc is null||!Eligible(npc,edit.Condition)){++skipped;continue;}
-                    await _action(game,edit.Condition.HasValue?"condition":"activity",id,100,edit.Condition,edit.Activity);
+                    if(npc is null||(edit.Move?!CanMoveMap(npc):!Eligible(npc,edit.Condition))){++skipped;continue;}
+                    if(edit.Move){
+                        if(_frozenIds.Count>0&&await _freezeControl(game,false)=="FROZEN:0")_frozenIds.Clear();
+                        await _frontAction(game,id,edit.Metres,moveSlot);
+                    }
+                    else await _action(game,edit.Freeze?"freeze":edit.Condition.HasValue?"condition":"activity",id,100,edit.Condition,edit.Activity);
+                    if(edit.Freeze)_frozenIds.Add(id);
                     ++requested;
                 }
                 catch(Exception ex) when(ex is InvalidOperationException or System.ComponentModel.Win32Exception or System.IO.IOException){
-                    ++failed;
+                    ++failed;firstFailure??=ex.Message;
                     if(_stale){stopped=ex.Message;break;}
                 }
             }
@@ -382,9 +449,28 @@ internal sealed class NpcOverlayMenu : IDisposable
             if(_page==Page.GlobalConfirm)_page=edit.Parent;
             int remaining=edit.Ids.Length-requested-skipped-failed;
             return $"{edit.Label}: {requested} requested, {skipped} skipped, {failed} failed."+
-                (stopped is null?" Leave gameplay unpaused to complete transitions.":$" Stopped: {stopped}. {remaining} not processed.");
+                (stopped is null?(firstFailure is null?" Leave gameplay unpaused to complete transitions.":" First failure: "+firstFailure):$" Stopped: {stopped}. {remaining} not processed.");
         }
         finally{Busy=false;}
+    }
+    public async Task PingFreezeAsync(){
+        if(_disposed||Busy||Refreshing||_freezePing||_frozenIds.Count==0)return;
+        _freezePing=true;
+        try{if(await _freezeControl(Game(),false)=="FROZEN:0")_frozenIds.Clear();}
+        catch(Exception ex) when(ex is InvalidOperationException or System.ComponentModel.Win32Exception or System.IO.IOException){}
+        finally{_freezePing=false;}
+    }
+    public async Task<string> RestoreFrozenAsync(){
+        if(Busy)throw new InvalidOperationException("Wait for the current NPC update.");
+        if(_frozenIds.Count==0)return "No NPCs frozen.";
+        if(_game is null||_game.HasExited){_frozenIds.Clear();return "Game closed; freeze cleared.";}
+        Busy=true;
+        try{
+            while(_freezePing)await Task.Delay(25);
+            var result=await _freezeControl(_game,true);
+            if(result!="FROZEN:0")throw new InvalidOperationException("NPC restoration was not confirmed.");
+            _frozenIds.Clear();return "NPCs unfrozen; original AI settings restored.";
+        }finally{Busy=false;}
     }
     public void Dispose(){_disposed=true;_game?.Dispose();}
 }

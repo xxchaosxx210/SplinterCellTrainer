@@ -6,7 +6,7 @@ Windows trainer for the original Tom Clancy's Splinter Cell on Steam, built with
 
 
 
-**Trainer:** v0.24.0 prototype
+**Trainer:** v0.26.1 prototype
 
 **Supported Steam build:** 252083 (App ID 13560)
 
@@ -586,3 +586,26 @@ F6 → **Sam Equipment** offers Weapons, Launcher ammunition, Gadgets and tools,
 Each item displays current ownership and quantity. Consumables offer Give 1, Give 5 and Set quantity (1–999 input, capped at the game's own MaxQuantity). Nonstacking weapons/tools offer Give item. Equip / select uses the game's normal inventory selection and requires an owned item. Launcher selection also requires the SC-20K. Sam must be in normal gameplay outside interactions. Grants of items missing from inventory load their allowlisted class, spawn an engine-owned actor and call the normal inventory Add routine; existing items are updated without spawning duplicates. No raw inventory arrays are resized or overwritten. Unlimited gadgets may refill a quantity you lower.
 
 Live inventory reading was verified against the supported running game. The user chose to test grants and selection themselves; those gameplay paths remain unverified.
+
+
+## Global Freeze NPCs (v0.25.0)
+
+F6 → NPC Manager → Global controls → **Freeze NPCs**, then confirm. The current scope, automatic protections and manual exclusions determine the captured eligible living NPCs. Map and spawned NPCs are supported. The same control becomes **Unfreeze NPCs** and restores all NPCs owned by that freeze, even if scope changes. Frozen NPCs are marked in Browse and are excluded from condition/activity edits until thawed.
+
+The implementation uses EPawn.bDisableAI, the flag used by the game's own FreezePawns function. Original packed-bit values are preserved per pawn identity. NPC destruction and level changes are checked; trainer exit restores owned freezes, and a 15-second heartbeat timeout restores them if the trainer stops responding. Unfreeze before saving: the game may serialize the frozen AI flag into a save. Gameplay verification is pending.
+
+
+## Move existing map NPCs in front of Sam (v0.26.0)
+
+NPC editor → Position → **Distance in front of Sam** offers 3, 4, 5 and 6 metres (default 3). **In front of Sam** uses that shared selection. Global controls offers the same distance selector and **Move all map NPCs in front of Sam**, with a Cancel-first confirmation. This relocates existing actors and creates no NPCs. The existing spawn feature is unchanged.
+
+The group move captures eligible map NPC IDs, including named/unarmed/protected characters, and excludes trainer spawns, manually excluded actors, and states that existing position editing cannot safely move. Its target set is independent of the condition/activity scope selector. Position → Exclude from group moves can protect an individual map NPC from this operation. Each captured actor is refreshed before its request; blocked or unavailable moves are reported without substituting another actor. Keep Sam still while the group is moved across a row in front of him. Existing freeze heartbeat is maintained during group movement.
+
+Native moves use normal engine collision checks, a world trace from Sam, and validation that collision adjustment did not bring the NPC closer than the selected forward distance. NPCs are rotated to face away from Sam. AI may subsequently turn, move, or detect Sam; mission scripts may react to relocating required characters. Gameplay verification is pending.
+
+
+### Forward-move fix (v0.26.1)
+
+Forward placement now calls the supported Engine.dll SingleLineCheck and MoveActor APIs directly rather than sending indexed native FastTrace / SetRotation functions through ProcessEvent. The previous trace never returned a usable result, rejecting every destination. Ground traces find the destination floor before collision testing, including different floor heights. Floor, wall and occupied-position failures have distinct messages, and group summaries include the first failure reason.
+
+Read-only live placement probes in Kalinatek verified a clear, collision-valid 3-metre point and a blocked 6-metre point. The probes use FarMoveActor's test flag and do not relocate NPCs. The user confirmed actual NPC relocation works in v0.26.1.

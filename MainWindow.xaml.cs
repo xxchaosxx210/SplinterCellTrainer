@@ -12,6 +12,10 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _overlayNpcs.ConfigureEsp(()=>EnemyEspToggle.IsChecked==true,()=>{
+            EnemyEspToggle.IsChecked=EnemyEspToggle.IsChecked!=true;
+            return EspStatus.Text;
+        },()=>!IsBusy&&!_shutdownRunning);
         _cheatControlsReady=true;
         // WPF work-area dimensions already account for Windows display scaling.
         var workArea = SystemParameters.WorkArea;
@@ -90,7 +94,6 @@ public partial class MainWindow : Window
         bool ready=!_levelLoading&&!_overlayNpcs.Busy&&!_healthChanging&&!_cheatsChanging&&!_cheatRefreshBusy&&!_worldActionChanging;
         var settings=ReadCheatSettings();
         var items=new List<GameMenuEntry> {
-            new("Enemy ESP",EnemyEspToggle.IsChecked==true,ready,"cheat:0"),
             new("Infinite health",InfiniteHealthToggle.IsChecked==true,ready,"cheat:1")
         };
         string[] labels={"Unlimited ammunition","No reload","Unlimited gadgets","Reduced detection",$"Movement speed ({settings.SpeedPercent/100.0:0.##}x)","Invisibility","Noclip (walls / doors)","Bypass locks","Quiet lights out"};

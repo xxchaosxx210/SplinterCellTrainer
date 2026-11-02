@@ -19,9 +19,9 @@ internal sealed class NpcOverlayMenu : IDisposable
         _read=read??DirectLevelLoader.ReadNpcsAsync;
         _action=action??((game,act,id,hp,condition,activity)=>DirectLevelLoader.NpcActionAsync(game,act,id,hp,condition,activity,waitForCompletion:false));
     }
-    private enum Page { Spawn, Roster, Edit, Condition, Activity, Health, Position, Details, RemoveAll, GlobalCondition, GlobalActivity, GlobalConfirm }
+    private enum Page { Spawn, Roster, Edit, Condition, Activity, Health, Position, Details, RemoveAll, GlobalCondition, GlobalActivity, GlobalConfirm, Global, Filter, Scope, Cleanup, RemoveOne }
     private Page _page;
-    private sealed record GlobalEdit(int Pid,uint[] Ids,NpcConditionEdit? Condition,NpcActivityEdit? Activity,string Label,Page Parent,int Token);
+    private sealed record GlobalEdit(int Pid,uint[] Ids,NpcConditionEdit? Condition,NpcActivityEdit? Activity,string Label,Page Parent,int Token,string Scope);
     private GlobalEdit? _global;
     private int _globalToken;
     private Page _globalReturnPage=Page.GlobalCondition;
@@ -30,9 +30,14 @@ internal sealed class NpcOverlayMenu : IDisposable
     private bool Eligible(NpcSnapshot n,NpcConditionEdit? condition)=>!n.ProtectedGlobal&&!_globalExcluded.Contains(n.Id)&&n.Present&&(condition.HasValue?n.CanSetCondition(condition.Value):n.CanEditActivity);
     private bool GlobalPage=>_page is Page.GlobalCondition or Page.GlobalActivity or Page.GlobalConfirm;
 
-    private bool _mapRoster,_mapRoot;
-    public void OpenSpawns(){_global=null;_mapRoot=false;_mapRoster=false;_page=Page.Spawn;}
-    public void OpenMapRoster(){_global=null;_mapRoot=true;_mapRoster=true;_page=Page.Roster;}
+    private enum NpcScope { All, Map, Spawned }
+    private NpcScope _filter=NpcScope.All,_scope=NpcScope.All;
+    private static string ScopeLabel(NpcScope scope)=>scope switch {NpcScope.Map=>"Map",NpcScope.Spawned=>"Spawned",_=>"Map + Spawned"};
+    private static bool InScope(NpcSnapshot n,NpcScope scope)=>scope==NpcScope.All||(scope==NpcScope.Spawned)==n.TrainerSpawned;
+    public void OpenManager(){_global=null;_page=Page.Spawn;}
+
+    public void OpenSpawns(){OpenManager();}
+    public void OpenMapRoster(){_global=null;_filter=NpcScope.Map;_page=Page.Roster;}
     private NpcSnapshot[] Spawned=>_npcs.Where(n=>n.TrainerSpawned).ToArray();
     private string DisplayName(NpcSnapshot npc)=>_names.TryGetValue(npc.Id,out var name)?name:npc.TrainerSpawned?$"Guard {npc.Id:00}":string.IsNullOrEmpty(npc.InstanceName)?$"Map NPC {npc.Id}":npc.InstanceName;
     private string SelectedName=>Selected is NpcSnapshot npc?DisplayName(npc):$"NPC {_selected}";
@@ -55,35 +60,58 @@ internal sealed class NpcOverlayMenu : IDisposable
             bool ready=!Busy&&!_stale;
             var n=Selected;
             var rows=new List<GameMenuEntry>();
-            string title="SPAWN NPCs";
+            string title="NPC MANAGER";
             switch(_page) {
                 case Page.Spawn:
-                    rows.Add(Row("Spawn guard in front of Sam","spawn",ready&&Spawned.Length<8));
-                    rows.Add(Row($"Manage spawned NPCs ({Spawned.Length} / 8)","roster",navigation:true));
-                    rows.Add(Row($"Map NPCs ({_npcs.Count(n=>!n.TrainerSpawned)})","map-roster",navigation:true));
-                    rows.Add(Row("Remove all spawned NPCs","remove-all",ready&&_npcs.Any(n=>n.CanRemove)));
+                    rows.Add(Row("Spawn guard","spawn",ready&&Spawned.Length<8,$"{Spawned.Length} / 8"));
+                    rows.Add(Row("Browse NPCs","browse",navigation:true));
+                    rows.Add(Row("Global controls","global-menu",navigation:true));
+                    rows.Add(Row("Cleanup","cleanup",navigation:true));
                     break;
                 case Page.Roster:
-                    title=(_mapRoster?"MAP NPCs":"SPAWNED NPCs")+(_stale?" / UPDATING":"");
-                    {
-                        rows.Add(Row("Global condition (map + spawned NPCs)","global-condition",navigation:true));
-                        rows.Add(Row("Global activity (map + spawned NPCs)","global-activity",navigation:true));
-                    }
-                    var roster=_npcs.Where(n=>n.TrainerSpawned!=_mapRoster).ToArray();
-                    foreach(var npc in roster)rows.Add(Row($"{DisplayName(npc)}\n{npc.Condition} / {npc.Activity}",$"npc:{_game?.Id??0}:{npc.Id}",!_stale,navigation:true));
-                    if(roster.Length==0)rows.Add(Row(_stale?"Load a mission to connect":_mapRoster?"No map NPCs":"No spawned NPCs","empty",false,""));
+                    title="BROWSE NPCs"+(_stale?" / UPDATING":"");
+                    rows.Add(Row("Filter","filter-menu",value:_filter==NpcScope.All?"All":ScopeLabel(_filter),navigation:true));
+                    var roster=_npcs.Where(n=>InScope(n,_filter)).ToArray();
+                    foreach(var npc in roster)rows.Add(Row(DisplayName(npc),$"npc:{_game?.Id??0}:{npc.Id}",!_stale,
+                        npc.ProtectedGlobal?"Protected":_globalExcluded.Contains(npc.Id)?"Excluded":npc.Condition,true));
+                    if(roster.Length==0)rows.Add(Row(_stale?"Load a mission to connect":"No NPCs in this filter","empty",false,""));
+                    break;
+                case Page.Filter:
+                case Page.Scope:
+                    title=_page==Page.Filter?"BROWSE FILTER":"GLOBAL TARGET SCOPE";
+                    foreach(var choice in Enum.GetValues<NpcScope>())rows.Add(Row(choice==NpcScope.All?"All (map + spawned)":ScopeLabel(choice),
+                        (_page==Page.Filter?"filter:":"scope:")+(int)choice,value:(_page==Page.Filter?_filter:_scope)==choice?"Selected":"",navigation:true));
+                    break;
+                case Page.Global:
+                    title="GLOBAL CONTROLS";
+                    rows.Add(Row("Scope","scope-menu",value:ScopeLabel(_scope),navigation:true));
+                    rows.Add(Row("Condition","global-condition",navigation:true));
+                    rows.Add(Row("Activity","global-activity",navigation:true));
+                    int available=_npcs.Count(npc=>InScope(npc,_scope)&&!npc.ProtectedGlobal&&!_globalExcluded.Contains(npc.Id)&&
+                        (npc.CanEditActivity||npc.CanSetCondition(NpcConditionEdit.Alive)));
+                    int excluded=_npcs.Count(npc=>InScope(npc,_scope)&&(npc.ProtectedGlobal||_globalExcluded.Contains(npc.Id)));
+                    rows.Add(Row($"Eligible: {available} / Excluded: {excluded}","scope-counts",false,""));
+                    break;
+                case Page.Cleanup:
+                    title="NPC CLEANUP";
+                    rows.Add(Row("Remove all spawned NPCs","remove-all",ready&&_npcs.Any(npc=>npc.CanRemove)));
+                    rows.Add(Row("Map NPCs cannot be removed","cleanup-info",false,""));
+                    break;
+                case Page.RemoveOne:
+                    title=$"REMOVE {SelectedName}?";
+                    rows.Add(Row("Cancel","remove-cancel",navigation:true));
+                    rows.Add(Row("Yes / remove NPC",$"remove-confirm:{_selectedPid}:{_selected}",ready&&n?.CanRemove==true));
                     break;
                 case Page.Edit:
-                    title=$"{SelectedName} / {(n is null?"UNAVAILABLE":n.Condition)}";
+                    title=$"{SelectedName} / {(n?.TrainerSpawned==true?"SPAWNED":"MAP")}";
+                    rows.Add(Row(n is null?"Unavailable":$"{n.Condition} / {n.Activity} / {n.Health} HP","npc-summary",false,""));
                     rows.Add(Row("Condition","condition",n is not null,n?.Condition??"--",navigation:true));
                     rows.Add(Row("Activity","activity",n is not null,n?.Activity??"--",navigation:true));
                     rows.Add(Row("Health","health",n is not null,n is null?"--":$"{n.Health} HP",navigation:true));
                     rows.Add(Row("Position","position-menu",n is not null,navigation:true));
-                    rows.Add(Row("Move in front of Sam","front",ready&&n?.CanEditPosition==true));
-                    rows.Add(new("Rename",false,n is not null&&!Busy,InputKey("rename"),null,false,false,new("NPC display name",SelectedName,MenuInputKind.Name)));
+                    rows.Add(Row("Details / Rename","details",n is not null,navigation:true));
                     rows.Add(new("Exclude from global edits",n is not null&&(n.ProtectedGlobal||_globalExcluded.Contains(n.Id)),n is not null&&!Busy&&!n.ProtectedGlobal,"global-exclude"));
-                    rows.Add(Row("Detailed stats","details",n is not null,navigation:true));
-                    rows.Add(Row("Remove this NPC","remove",ready&&n?.CanRemove==true));
+                    rows.Add(Row("Remove NPC","remove-menu",ready&&n?.CanRemove==true));
                     break;
                 case Page.Condition:
                     title=$"{SelectedName} / CONDITION";
@@ -96,7 +124,7 @@ internal sealed class NpcOverlayMenu : IDisposable
                     break;
                 case Page.Health:
                     title=$"{SelectedName} / HEALTH";
-                    rows.Add(new("Custom health (1â€“100)",false,ready&&n?.CanEditHealth==true,InputKey("custom-health"),null,false,false,new("NPC health",(n?.Health??100).ToString(CultureInfo.InvariantCulture),MenuInputKind.Health,3)));
+                    rows.Add(new("Custom health (1-100)",false,ready&&n?.CanEditHealth==true,InputKey("custom-health"),null,false,false,new("NPC health",(n?.Health??100).ToString(CultureInfo.InvariantCulture),MenuInputKind.Health,3)));
                     foreach(int hp in new[]{100,75,50,25,1})rows.Add(Row($"Set health to {hp}",$"health:{hp}",ready&&n?.CanEditHealth==true));
                     break;
                 case Page.Position:
@@ -111,27 +139,29 @@ internal sealed class NpcOverlayMenu : IDisposable
                     }
                     break;
                 case Page.Details:
-                    title=$"{SelectedName} / STATS";
+                    title=$"{SelectedName} / DETAILS";
                     if(n is not null){
+                        rows.Add(new("Rename",false,!Busy,InputKey("rename"),null,false,false,new("NPC display name",SelectedName,MenuInputKind.Name)));
                         string[] stats={n.Origin+" / "+n.Type,"Instance: "+n.InstanceName,$"Health: {n.Health} / 100","Condition: "+n.Condition,"Activity: "+n.Activity,"Movement: "+n.Movement,$"Distance: {n.Distance:0.0} m","Weapon: "+n.Weapon,$"XYZ: {n.X:0.###}, {n.Y:0.###}, {n.Z:0.###}","Pawn state: "+n.PawnState,"AI state: "+n.AiState,"Target: "+n.Target,"Controller: "+(n.Controller?"Attached":"None")};
                         for(int i=0;i<stats.Length;++i)rows.Add(Row(stats[i],"stat:"+i,false,""));
                     }
                     break;
                 case Page.GlobalCondition:
-                    title="ALL NPCs / CONDITION";
+                    title=ScopeLabel(_scope).ToUpperInvariant()+" / CONDITION";
                     foreach(var c in Enum.GetValues<NpcConditionEdit>()){
-                        int count=_npcs.Count(npc=>Eligible(npc,c));
+                        int count=_npcs.Count(npc=>InScope(npc,_scope)&&Eligible(npc,c));
                         rows.Add(Row(ConditionLabel(c),$"global-condition:{(int)c}",ready&&count>0,$"{count} eligible",true));
                     }
                     break;
                 case Page.GlobalActivity:
-                    title="ALL NPCs / ACTIVITY";
-                    int eligible=_npcs.Count(npc=>Eligible(npc,null));
+                    title=ScopeLabel(_scope).ToUpperInvariant()+" / ACTIVITY";
+                    int eligible=_npcs.Count(npc=>InScope(npc,_scope)&&Eligible(npc,null));
                     for(int i=0;i<ActivityLabels.Length;++i)rows.Add(Row(ActivityLabels[i],$"global-activity:{i+1}",ready&&eligible>0,$"{eligible} eligible",true));
                     break;
                 case Page.GlobalConfirm:
-                    title="APPLY TO ALL NPCs?";
-                    rows.Add(Row("Cancel","global-cancel",navigation:true));
+                    title=$"APPLY TO {_global?.Scope??ScopeLabel(_scope)}?";
+                    if(_global is not null)rows.Add(Row("Cancel","global-cancel",navigation:true));
+                    else if(Busy)rows.Add(Row("Applying requests...","global-pending",false,""));
                     if(_global is not null)rows.Add(Row($"{_global.Label} / {_global.Ids.Length} NPCs",$"global-confirm:{_global.Token}",ready));
                     break;
                 case Page.RemoveAll:
@@ -141,14 +171,18 @@ internal sealed class NpcOverlayMenu : IDisposable
                     break;
             }
             rows.Add(BackRow());
-            return new($"npc:{_page}:{_mapRoster}:{_selected}:{_game?.Id??0}",title,rows.ToArray());
+            return new($"npc:{_page}:{_filter}:{_scope}:{_selected}:{_game?.Id??0}",title,rows.ToArray());
         }
     }
     public bool Back()
     {
-        if(_page==Page.Spawn||(_page==Page.Roster&&_mapRoster&&_mapRoot))return false;
-        if(GlobalPage){_page=_page==Page.GlobalConfirm?(_global?.Parent??_globalReturnPage):Page.Roster;_global=null;return true;}
-        _page=_page switch {Page.Roster or Page.RemoveAll=>Page.Spawn,Page.Edit=>Page.Roster,_=>Page.Edit};
+        if(_page==Page.Spawn)return false;
+        if(GlobalPage){_page=_page==Page.GlobalConfirm?(_global?.Parent??_globalReturnPage):Page.Global;_global=null;return true;}
+        _page=_page switch {
+            Page.Roster or Page.Global or Page.Cleanup=>Page.Spawn,
+            Page.Filter=>Page.Roster,Page.Scope=>Page.Global,Page.RemoveAll=>Page.Cleanup,
+            Page.Edit=>Page.Roster,Page.RemoveOne=>Page.Edit,_=>Page.Edit
+        };
         return true;
     }
     private Process Game()
@@ -176,7 +210,7 @@ internal sealed class NpcOverlayMenu : IDisposable
             _npcs=snapshot.Where(n=>n.Present).OrderBy(n=>n.Id).ToArray();_stale=false;
             if(_selected!=0&&!_npcs.Any(n=>n.Id==_selected)){
                 _selected=0;_selectedPid=0;
-                if(!GlobalPage&&_page is not (Page.Spawn or Page.Roster or Page.RemoveAll))_page=Page.Roster;
+                if(_page is Page.Edit or Page.Condition or Page.Activity or Page.Health or Page.Position or Page.Details or Page.RemoveOne)_page=Page.Roster;
             }
         }
         catch{_stale=true;throw;}
@@ -184,6 +218,27 @@ internal sealed class NpcOverlayMenu : IDisposable
     }
     public async Task<string> ActivateAsync(string key)
     {
+        if(key is "browse" or "global-menu" or "cleanup" or "filter-menu" or "scope-menu"){
+            _global=null;
+            _page=key switch {"browse"=>Page.Roster,"global-menu"=>Page.Global,"cleanup"=>Page.Cleanup,"filter-menu"=>Page.Filter,_=>Page.Scope};return "";
+        }
+        if(key.StartsWith("filter:")||key.StartsWith("scope:")){
+            bool filter=key.StartsWith("filter:");
+            if(_page!=(filter?Page.Filter:Page.Scope)||!int.TryParse(key[(key.IndexOf(':')+1)..],out int value)||!Enum.IsDefined(typeof(NpcScope),value))
+                throw new InvalidOperationException("Select a valid NPC scope.");
+            if(filter){_filter=(NpcScope)value;_page=Page.Roster;}
+            else{_scope=(NpcScope)value;_page=Page.Global;}
+            return "";
+        }
+        if(key=="remove-menu"){
+            if(Selected?.CanRemove!=true)throw new InvalidOperationException("Only trainer-spawned NPCs can be removed.");
+            _page=Page.RemoveOne;return "Confirm removal of this spawned NPC.";
+        }
+        if(key=="remove-cancel"){_page=Page.Edit;return "Removal cancelled.";}
+        if(key.StartsWith("remove-confirm:")){
+            if(_page!=Page.RemoveOne||key!=$"remove-confirm:{_selectedPid}:{_selected}")throw new InvalidOperationException("Confirm the selected NPC first.");
+            key="remove";
+        }
         if(key=="global-exclude"){
             if(Busy||Selected is null||Selected.ProtectedGlobal)return "That NPC is protected or an update is pending.";
             if(!_globalExcluded.Add(Selected.Id))_globalExcluded.Remove(Selected.Id);
@@ -210,18 +265,18 @@ internal sealed class NpcOverlayMenu : IDisposable
                 while(Refreshing){await Task.Delay(25);if(_disposed)throw new InvalidOperationException("The NPC menu has closed.");}
                 await RefreshAsync(true);var game=Game();
                 NpcConditionEdit? c=condition?(NpcConditionEdit)value:null;
-                var ids=_npcs.Where(n=>Eligible(n,c)).Select(n=>n.Id).ToArray();
+                var ids=_npcs.Where(n=>InScope(n,_scope)&&Eligible(n,c)).Select(n=>n.Id).ToArray();
                 if(ids.Length==0)throw new InvalidOperationException("No NPCs are eligible for that edit.");
                 _global=new(game.Id,ids,c,condition?null:(NpcActivityEdit)value,condition?ConditionLabel(c!.Value):ActivityLabels[value-1],
-                    condition?Page.GlobalCondition:Page.GlobalActivity,++_globalToken);
+                    condition?Page.GlobalCondition:Page.GlobalActivity,++_globalToken,ScopeLabel(_scope));
                 _globalReturnPage=_global.Parent;_page=Page.GlobalConfirm;
                 return c==NpcConditionEdit.Dead?"This kills the selected map NPCs. Mission consequences still apply.":"Confirm to apply to the captured NPCs. Ineligible NPCs will be skipped.";
             } finally{Busy=false;}
         }
         if(key.StartsWith("global-confirm:"))return await ApplyGlobalAsync(key);
-        if(key=="roster"){_mapRoster=false;_page=Page.Roster;return "";}
-        if(key=="map-roster"){_mapRoot=false;_mapRoster=true;_page=Page.Roster;return "";}
-        if(key=="cancel"){_page=Page.Spawn;return "Removal cancelled.";}
+        if(key=="roster"){_filter=NpcScope.Spawned;_page=Page.Roster;return "";}
+        if(key=="map-roster"){_filter=NpcScope.Map;_page=Page.Roster;return "";}
+        if(key=="cancel"){_page=Page.Cleanup;return "Removal cancelled.";}
         if(key=="remove-all"){_page=Page.RemoveAll;return "Only trainer-spawned NPCs will be removed.";}
         if(key.StartsWith("npc:")){
             var parts=key.Split(':');
@@ -273,7 +328,7 @@ internal sealed class NpcOverlayMenu : IDisposable
                 var ids=_npcs.Where(n=>n.CanRemove).Select(n=>n.Id).ToArray();
                 int removed=0;
                 foreach(uint id in ids){await _action(game,"remove",id,100,null,null);++removed;}
-                await RefreshAsync(true);if(_page==Page.RemoveAll)_page=Page.Spawn;return $"Removed {removed} spawned NPCs.";
+                await RefreshAsync(true);if(_page==Page.RemoveAll)_page=Page.Cleanup;return $"Removed {removed} spawned NPCs.";
             }
             var npc=_npcs.FirstOrDefault(n=>n.Id==targetId);
             if(targetPid!=game.Id||npc is null)throw new InvalidOperationException("The selected NPC is no longer present.");

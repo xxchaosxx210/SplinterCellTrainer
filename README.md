@@ -6,7 +6,7 @@ Windows trainer for the original Tom Clancy's Splinter Cell on Steam, built with
 
 
 
-**Trainer:** v0.22.2 prototype
+**Trainer:** v0.23.0 prototype
 
 **Supported Steam build:** 252083 (App ID 13560)
 
@@ -567,3 +567,8 @@ Mission scripts can protect characters without these flags. These checks cannot 
 NPC snapshots and actions refresh each surviving pawn's current controller reference, validating its class, level and reciprocal pawn link. Revival or mission-script controller replacement no longer leaves the trainer using a stale controller. Pawn IDs, origin, custom names and manual global exclusions remain unchanged. A detached controller is reported unavailable until a valid controller attaches. NPCs actually in `s_Groggy` remain reviving until the game finishes recovery.
 
 The user confirmed the v0.22.2 revival tracking fix works in gameplay after testing global NPC edits.
+
+
+## NPC Manager layout (v0.23.0)
+
+F6 → **NPC Manager** now groups Spawn guard, Browse NPCs, Global controls and Cleanup. Browse uses one-line NPC rows and an All / Map / Spawned filter. Global controls has an independent Map + Spawned / Map / Spawned scope and keeps existing protection, confirmation and per-target validation. Changing the browse filter does not change global scope. Each NPC editor groups Condition, Activity, Health, Position and Details / Rename; position shortcuts live inside Position, and full stats and renaming live inside Details. Cleanup holds bulk spawned-NPC removal. Individual removal now opens a Cancel-first confirmation. Back returns through the current section to NPC Manager and then the main menu.

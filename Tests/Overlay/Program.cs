@@ -25,7 +25,7 @@ int before=calls.Count;
 await Reject(()=>menu.ActivateAsync("condition:99"),"invalid condition does not reach native code");
 Check(calls.Count==before,"invalid action leaves NPCs unchanged");
 await menu.ActivateAsync("remove");
-Check(menu.Frame.Title=="SPAWNED NPCs"&&!menu.Frame.Entries.Any(e=>e.Key==Key(9)),"confirmed removal drops the row and returns to roster");
+Check(menu.Frame.Title=="BROWSE NPCs"&&!menu.Frame.Entries.Any(e=>e.Key==Key(9)),"confirmed removal drops the row and returns to roster");
 await menu.ActivateAsync(Key(7));
 snapshots.RemoveAll(n=>n.Id==7);
 before=calls.Count;
@@ -40,13 +40,14 @@ Check(calls.Count==before,"cancelling bulk removal invokes no native actions");
 await menu.ActivateAsync("remove-all");await menu.ActivateAsync("confirm-remove-all");
 Check(calls.Skip(before).All(c=>c.Action=="remove"&&c.Id==2),"bulk removal only targets present trainer-spawned guards");
 Check(snapshots.Any(n=>n.Id==1&&!n.TrainerSpawned),"map NPC is preserved during remove all");
-snapshots.Clear();for(uint i=1;i<=8;++i)snapshots.Add(Guard(i));await menu.RefreshAsync(true);
+menu.OpenManager();snapshots.Clear();for(uint i=1;i<=8;++i)snapshots.Add(Guard(i));await menu.RefreshAsync(true);
 Check(!menu.Frame.Entries.First(e=>e.Key=="spawn").Available,"eight-spawn limit disables overlay spawning");
 await Reject(()=>menu.ActivateAsync("spawn"),"spawn limit also enforced before native action");
 await menu.ActivateAsync("roster");await menu.ActivateAsync(Key(1));
 snapshots[0]=snapshots[0] with {PawnState="s_Dying",Controller=false,Health=0};await menu.RefreshAsync(true);
+await menu.ActivateAsync("position-menu");
 Check(menu.Frame.Entries.First(e=>e.Key=="front").Available==false,"dead NPC health and movement edits disabled");
-Check(menu.Back()&&menu.Back()&&!menu.Back(),"back navigation returns editor to roster to spawn to main");
+Check(menu.Back()&&menu.Back()&&menu.Back()&&!menu.Back(),"back navigation returns editor to roster to spawn to main");
 
 
 var readStarted=new TaskCompletionSource<bool>();var releaseRead=new TaskCompletionSource<bool>();bool delayRead=false;int spawnCalls=0;
@@ -63,19 +64,19 @@ var mapSnapshots=new[]{Guard(44,false) with {InstanceName="MapGuard44"},Guard(45
 var pendingAction=new TaskCompletionSource<string>();var actionStarted=new TaskCompletionSource<uint>();uint editedId=0;
 using var maps=new NpcOverlayMenu(()=>Process.GetCurrentProcess(),_=>Task.FromResult<NpcSnapshot[]?>(mapSnapshots),(_,action,id,hp,c,a)=>{editedId=id;actionStarted.TrySetResult(id);return pendingAction.Task;});
 await maps.RefreshAsync(true);maps.OpenMapRoster();
-Check(maps.Frame.Title=="MAP NPCs"&&maps.Frame.Entries.Count(e=>e.Key.StartsWith("npc:"))==2&&maps.Frame.Entries.First(e=>e.Key==Key(44)).Label.StartsWith("MapGuard44"),"map roster shows named map NPCs separately from spawned guards");
+Check(maps.Frame.Title=="BROWSE NPCs"&&maps.Frame.Entries.Count(e=>e.Key.StartsWith("npc:"))==2&&maps.Frame.Entries.First(e=>e.Key==Key(44)).Label.StartsWith("MapGuard44"),"map roster shows named map NPCs separately from spawned guards");
 await maps.ActivateAsync(Key(44));
-Check(!maps.Frame.Entries.First(e=>e.Key=="remove").Available,"map NPC removal stays disabled in editor");
+Check(!maps.Frame.Entries.First(e=>e.Key=="remove-menu").Available,"map NPC removal stays disabled in editor");
 await Reject(()=>maps.ActivateAsync("remove"),"map NPC remove action is rejected before native code");
 var updating=maps.ActivateAsync("health:50");await actionStarted.Task;
 Check(maps.Busy&&maps.Frame.Entries.First(e=>e.Key=="back").Available,"back remains available during a pending NPC action");
-Check(maps.Back()&&maps.Frame.Title=="MAP NPCs","pending update does not prevent returning to the map roster");
+Check(maps.Back()&&maps.Frame.Title=="BROWSE NPCs","pending update does not prevent returning to the map roster");
 await maps.ActivateAsync(Key(45));await maps.ActivateAsync("condition");
 Check(maps.Frame.Title.Contains("CONDITION"),"condition submenu can be browsed during a pending action");
 Check(!maps.Frame.Entries.First(e=>e.Key=="condition:2").Available,"mutating actions remain blocked while a native request is pending");
 pendingAction.SetResult("Updated");await updating;
 Check(editedId==44&&!maps.Busy,"pending update keeps its original map NPC target while browsing");
-Check(maps.Back()&&maps.Back()&&!maps.Back(),"map roster opened from main returns directly to main");
+Check(maps.Back()&&maps.Back()&&maps.Back()&&!maps.Back(),"map roster opened from main returns directly to main");
 
 
 var installedMaps=new[]{new LevelMenuChoice("1_1_0Tbilisi","Police Station  /  1_1_0Tbilisi"),new LevelMenuChoice("1_1_1Tbilisi","Police Station  /  1_1_1Tbilisi"),new LevelMenuChoice("0_0_2_Training","Training  /  0_0_2_Training")};
@@ -139,7 +140,7 @@ using var global=new NpcOverlayMenu(()=>Process.GetCurrentProcess(),_=>Task.From
  globalCalls.Add((act,id,c,a));return Task.FromResult("Requested");
 });
 await global.RefreshAsync(true);global.OpenMapRoster();
-Check(global.Frame.Entries.Any(e=>e.Key=="global-condition")&&global.Frame.Entries.Any(e=>e.Key=="global-activity"),"map roster offers both global edit menus");
+Check(global.Frame.Entries.Any(e=>e.Key=="filter-menu"),"browse roster contains a dedicated filter without global actions");
 await global.ActivateAsync("global-condition");
 Check(global.Frame.Entries.First(e=>e.Key=="global-condition:1").Value=="1 eligible","global revival only counts knocked-out map NPCs");
 Check(global.Frame.Entries.First(e=>e.Key=="global-condition:2").Value=="2 eligible","global knockout excludes protected and incapacitated NPCs");
@@ -161,7 +162,7 @@ Check(!global.Busy&&global.Frame.Title.Contains("CONDITION"),"batch completion c
 await global.ActivateAsync("global-condition:1");confirm=global.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;
 await global.ActivateAsync(confirm);
 Check(globalCalls[^1]==("condition",104,NpcConditionEdit.Alive,null),"global revival dispatches only to knocked-out map NPC");
-Check(global.Back()&&global.Frame.Title=="MAP NPCs","Back from global submenu returns to map roster");
+Check(global.Back()&&global.Frame.Title=="GLOBAL CONTROLS","Back from global submenu returns to map roster");
 await global.ActivateAsync("global-activity");
 await global.ActivateAsync("global-activity:3");confirm=global.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;
 failGlobal=true;summary=await global.ActivateAsync(confirm);failGlobal=false;
@@ -173,7 +174,7 @@ using var bulkBusy=new NpcOverlayMenu(()=>Process.GetCurrentProcess(),_=>Task.Fr
 await bulkBusy.RefreshAsync(true);bulkBusy.OpenMapRoster();await bulkBusy.ActivateAsync("global-activity");await bulkBusy.ActivateAsync("global-activity:2");
 confirm=bulkBusy.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;
 var bulkTask=bulkBusy.ActivateAsync(confirm);await batchStarted.Task;
-Check(bulkBusy.Busy&&bulkBusy.Back()&&bulkBusy.Frame.Title.Contains("ACTIVITY")&&bulkBusy.Back()&&bulkBusy.Frame.Title=="MAP NPCs","batch keeps Back navigation available");
+Check(bulkBusy.Busy&&bulkBusy.Back()&&bulkBusy.Frame.Title.Contains("ACTIVITY")&&bulkBusy.Back()&&bulkBusy.Frame.Title=="GLOBAL CONTROLS","batch keeps Back navigation available");
 await bulkBusy.ActivateAsync("global-condition");
 Check(!bulkBusy.Frame.Entries.First(e=>e.Key=="global-condition:2").Available,"new batch mutations remain disabled while an action is pending");
 await bulkBusy.ActivateAsync("global-condition:2");
@@ -208,6 +209,41 @@ Check(!recovery.Frame.Entries.First(e=>e.Key=="global-condition:2").Available,"m
 recoverySnapshots[0]=recoverySnapshots[0] with {Controller=true,AiState="s_Alert"};recoverySnapshots[1]=recoverySnapshots[1] with {AiState="s_Investigate"};
 await recovery.RefreshAsync(true);
 Check(recovery.Frame.Entries.First(e=>e.Key=="global-condition:2").Value=="2 eligible","refreshed controllers and completed revival restore global knockout counts without new IDs");
+
+var layoutSnapshots=new List<NpcSnapshot>{Guard(601,false),Guard(602),Guard(603,false) with {ProtectedGlobal=true}};
+var layoutCalls=new List<uint>();
+using var layout=new NpcOverlayMenu(()=>Process.GetCurrentProcess(),_=>Task.FromResult<NpcSnapshot[]?>(layoutSnapshots.ToArray()),(_,act,id,hp,c,a)=>{layoutCalls.Add(id);if(act=="remove")layoutSnapshots.RemoveAll(n=>n.Id==id);return Task.FromResult("Requested");});
+await layout.RefreshAsync(true);layout.OpenManager();
+Check(layout.Frame.Title=="NPC MANAGER"&&layout.Frame.Entries.Select(e=>e.Key).SequenceEqual(new[]{"spawn","browse","global-menu","cleanup","back"}),"manager root only contains the four main sections and Back");
+await layout.ActivateAsync("browse");
+Check(layout.Frame.Entries.Count(e=>e.Key.StartsWith("npc:"))==3&&layout.Frame.Entries.All(e=>!e.Label.Contains('\n')),"All filter shows compact single-line rows for both origins");
+Check(!layout.Frame.Entries.Any(e=>e.Key=="global-condition"||e.Key=="remove-all"),"browse list contains no global or cleanup actions");
+Check(layout.Frame.Entries.First(e=>e.Key==Key(603)).Value=="Protected","protected NPCs are marked in the compact roster");
+await layout.ActivateAsync("filter-menu");await layout.ActivateAsync("filter:1");
+Check(layout.Frame.Entries.Count(e=>e.Key.StartsWith("npc:"))==2&&!layout.Frame.Entries.Any(e=>e.Key==Key(602)),"Map filter only shows map NPCs");
+await layout.ActivateAsync("filter-menu");await layout.ActivateAsync("filter:2");
+Check(layout.Frame.Entries.Count(e=>e.Key.StartsWith("npc:"))==1&&layout.Frame.Entries.Any(e=>e.Key==Key(602)),"Spawned filter only shows trainer spawns");
+Check(layout.Back()&&layout.Frame.Title=="NPC MANAGER","browse returns to manager");
+await layout.ActivateAsync("global-menu");
+Check(layout.Frame.Entries.First(e=>e.Key=="scope-menu").Value=="Map + Spawned","browse filter does not change the default global scope");
+await layout.ActivateAsync("scope-menu");await layout.ActivateAsync("scope:1");await layout.ActivateAsync("global-condition");
+Check(layout.Frame.Entries.First(e=>e.Key=="global-condition:2").Value=="1 eligible","Map global scope respects protected exclusions");
+await layout.ActivateAsync("global-condition:2");confirm=layout.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;await layout.ActivateAsync(confirm);
+Check(layoutCalls.SequenceEqual(new uint[]{601}),"Map scope only dispatches to eligible map NPCs");
+layout.Back();await layout.ActivateAsync("scope-menu");await layout.ActivateAsync("scope:2");await layout.ActivateAsync("global-activity");await layout.ActivateAsync("global-activity:2");
+confirm=layout.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;layoutCalls.Clear();await layout.ActivateAsync(confirm);
+Check(layoutCalls.SequenceEqual(new uint[]{602}),"Spawned global scope dispatches activity only to spawns");
+layout.OpenManager();await layout.ActivateAsync("browse");await layout.ActivateAsync(Key(602));
+Check(!layout.Frame.Entries.Any(e=>e.Key=="front"||e.Key.StartsWith("rename:")),"editor keeps position shortcuts and rename off its main page");
+await layout.ActivateAsync("details");Check(layout.Frame.Entries.Any(e=>e.Key.StartsWith("rename:")),"Details contains Rename and stats together");layout.Back();
+await layout.ActivateAsync("position-menu");Check(layout.Frame.Entries.Any(e=>e.Key=="front")&&layout.Frame.Entries.Any(e=>e.Key=="to-sam"),"Position groups both movement shortcuts");layout.Back();
+int layoutBefore=layoutCalls.Count;await layout.ActivateAsync("remove-menu");
+Check(layout.Frame.Entries[0].Key=="remove-cancel"&&layoutCalls.Count==layoutBefore,"individual removal opens a Cancel-first confirmation without acting");
+await layout.ActivateAsync("remove-cancel");Check(layoutCalls.Count==layoutBefore,"cancelling individual removal preserves the NPC");
+await layout.ActivateAsync("remove-menu");await layout.ActivateAsync($"remove-confirm:{Environment.ProcessId}:602");
+Check(layoutCalls[^1]==602&&!layout.Frame.Entries.Any(e=>e.Key==Key(602)),"confirmed individual removal preserves actor identity and drops the roster row");
+layout.OpenManager();await layout.ActivateAsync("cleanup");await layout.ActivateAsync("remove-all");await layout.ActivateAsync("cancel");
+Check(layout.Frame.Title=="NPC CLEANUP"&&layout.Back()&&layout.Frame.Title=="NPC MANAGER"&&!layout.Back(),"cleanup confirmation returns to cleanup then manager then main menu");
 
 namespace SCTrainer {
  internal sealed record GameMenuEntry(string Label,bool On,bool Available,string Key,string? Value=null,bool Toggle=true,bool Navigation=false,GameMenuInput? Input=null);

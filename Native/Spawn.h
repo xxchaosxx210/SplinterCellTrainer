@@ -1,12 +1,19 @@
 #pragma once
 #include <cmath>
 #include "NpcTrackingPolicy.h"
+#include "MovePlacement.h"
 
 // Bounded registry of map NPCs and trainer spawns; all access runs on the game thread.
 namespace TrainerSpawn {
 using Byte=unsigned char;
 struct Vec {float x,y,z;};
 struct Rot {int pitch,yaw,roll;};
+// Validated supported Engine.dll FCheckResult layout (also used by execFastTrace).
+struct MoveCheck {void* next;void* actor;Vec location,normal;void* primitive;float time;int item;void* material;DWORD bone,level;};
+static_assert(sizeof(MoveCheck)==0x38,"Supported x86 FCheckResult layout required");
+static MoveCheck NewCheck(){MoveCheck c={};c.time=1;c.item=-1;return c;}
+using LineCheckFn=int (__thiscall*)(void*,MoveCheck&,void*,const Vec&,const Vec&,DWORD,Vec,void*);
+using RotateFn=int (__thiscall*)(void*,void*,Vec,Rot,MoveCheck&,int,int,int,int);
 using SpawnFn=Byte* (__thiscall*)(void*,void*,DWORD,Vec,Rot,void*,int,int,void*,void*);
 using DestroyFn=int (__thiscall*)(void*,void*,int);
 using EventFn=void (__thiscall*)(void*,void*,void*,void*);
@@ -236,7 +243,7 @@ static void RefreshControllers(DWORD* objects,TrainerCheats::NameFn name) {
         item.controllerIndex=bind?U(ctrl,4):0;item.controllerName=bind?U(ctrl,0x20):0;
     }
 }
-static void Position(Request* r,SpawnRecord* record,int mode,Vec destination,Byte* player,HMODULE engine,DWORD* objects,TrainerCheats::NameFn name) {
+static void Position(Request* r,SpawnRecord* record,int mode,Vec destination,Byte* player,HMODULE engine,DWORD* objects,TrainerCheats::NameFn name,int metres=3,int slot=0,bool probe=false) {
     auto pawn=record->pawn,ctrl=record->controller;
     DWORD hp=Property(objects,name,L"Pawn",L"Health"),pc=Property(objects,name,L"Pawn",L"Controller"),cp=Property(objects,name,L"Controller",L"Pawn");
     if(!hp||!pc||!cp){r->result=3;return;}
@@ -244,21 +251,60 @@ static void Position(Request* r,SpawnRecord* record,int mode,Vec destination,Byt
        U(ctrl,0x20)!=record->controllerName||(U(ctrl,0x2c)&0x10)||reinterpret_cast<Byte*>(U(pawn,pc))!=ctrl||reinterpret_cast<Byte*>(U(ctrl,cp))!=pawn){r->result=37;return;}
     auto state=State(ctrl,name),ps=State(pawn,name);
     if(Unconscious(ps,state)||(wcscmp(state,L"s_Default")&&wcscmp(state,L"s_Investigate")&&wcscmp(state,L"s_Alert"))){r->result=37;return;}
+    Vec original=*reinterpret_cast<Vec*>(pawn+0xd4),samLocation={};float facingYaw=0;DWORD traceClear=1;
+    auto line=reinterpret_cast<LineCheckFn>(GetProcAddress(engine,"?SingleLineCheck@ULevel@@UAEHAAUFCheckResult@@PAVAActor@@ABVFVector@@2KV4@1@Z"));
+    auto rotate=reinterpret_cast<RotateFn>(GetProcAddress(engine,"?MoveActor@ULevel@@UAEHPAVAActor@@VFVector@@VFRotator@@AAUFCheckResult@@HHHH@Z"));
+    if(mode==1&&!MovePlacement::Valid(metres,slot)){r->result=6;return;}
     if(mode) {
         DWORD samOffset=Property(objects,name,L"EPlayerController",L"EPawn"),height=Property(objects,name,L"Actor",L"CollisionHeight");
         if(!samOffset||!height){r->result=3;return;}
         auto sam=reinterpret_cast<Byte*>(U(player,samOffset));if(!TrainerCheats::IsA(sam,L"EPawn")){r->result=16;return;}
-        destination=*reinterpret_cast<Vec*>(sam+0xd4);
+        destination=*reinterpret_cast<Vec*>(sam+0xd4);samLocation=destination;
         destination.z+=*reinterpret_cast<float*>(pawn+height)-*reinterpret_cast<float*>(sam+height);
-        if(mode==1){float yaw=static_cast<int>(U(player,0xe4))*(6.28318530718f/65536.0f);destination.x+=std::cos(yaw)*200;destination.y+=std::sin(yaw)*200;}
+        if(mode==1){
+            facingYaw=static_cast<int>(U(player,0xe4))*(6.28318530718f/65536.0f);
+            auto delta=MovePlacement::Offset(metres,slot,facingYaw);destination.x+=delta.x;destination.y+=delta.y;
+            if(!line||!rotate){r->result=60;return;}
+            // Call the validated native collision API directly. These indexed native
+            // functions are not dispatched by UObject::ProcessEvent.
+            bool grounded=false;float floorZ=0;MoveCheck last=NewCheck();
+            for(float lift:{150.0f,300.0f,75.0f,0.0f}){
+                Vec start={destination.x,destination.y,samLocation.z+lift},end={destination.x,destination.y,samLocation.z-400};
+                last=NewCheck();line(record->level,last,sam,end,start,0xd7,{0,0,0},nullptr);
+                if(last.actor&&last.normal.z>=0.5f&&std::isfinite(last.location.z)&&std::fabs(last.location.z-samLocation.z)<400){floorZ=last.location.z;grounded=true;break;}
+            }
+            if(!grounded){
+                if(probe){swprintf_s(r->map,L"GROUND actor=%08lX normal=%.1f,%.1f,%.1f hit=%.0f,%.0f,%.0f",reinterpret_cast<DWORD>(last.actor),last.normal.x,last.normal.y,last.normal.z,last.location.x,last.location.y,last.location.z);r->result=61;return;}
+                r->result=62;return;
+            }
+            float npcHeight=*reinterpret_cast<float*>(pawn+height),samHeight=*reinterpret_cast<float*>(sam+height);
+            if(!std::isfinite(npcHeight)||npcHeight<=0||npcHeight>300||!std::isfinite(samHeight)||samHeight<=0||samHeight>300){r->result=60;return;}
+            destination.z=floorZ+npcHeight+2;
+            Vec from=samLocation,to=destination;from.z+=samHeight*0.8f;to.z+=npcHeight*0.8f;
+            auto sight=NewCheck();line(record->level,sight,sam,to,from,0xd7,{0,0,0},nullptr);traceClear=sight.actor?0:1;
+            if(!traceClear&&!probe){r->result=63;return;}
+        }
     }
     for(float value:{destination.x,destination.y,destination.z})if(!std::isfinite(value)||std::fabs(value)>1000000){r->result=6;return;}
     // Exactly the normal Actor.SetLocation path: FarMoveActor with all three
     // optional flags zero. This preserves collision checks and volume updates.
     auto move=reinterpret_cast<int (__thiscall*)(void*,void*,Vec,int,int,int)>(GetProcAddress(engine,"?FarMoveActor@ULevel@@UAEHPAVAActor@@VFVector@@HHH@Z"));
     if(!move||reinterpret_cast<Byte*>(U(pawn,0x70))!=record->level){r->result=3;return;}
+    if(probe){
+        int fits=traceClear?move(record->level,pawn,destination,1,0,0):0;
+        swprintf_s(r->map,L"FRONT trace=%lu fits=%d yaw=%.0f Sam=%.0f,%.0f,%.0f To=%.0f,%.0f,%.0f",traceClear,fits,facingYaw*57.29578f,samLocation.x,samLocation.y,samLocation.z,destination.x,destination.y,destination.z);
+        r->result=61;return;
+    }
     if(!move(record->level,pawn,destination,0,0,0)){r->result=40;return;}
     auto actual=*reinterpret_cast<Vec*>(pawn+0xd4);
+    if(mode==1){
+        if(!MovePlacement::FarEnough(actual.x-samLocation.x,actual.y-samLocation.y,facingYaw,metres)){
+            move(record->level,pawn,original,0,0,0);r->result=40;return;
+        }
+        Rot rotation={0,static_cast<int>(std::atan2(actual.y-samLocation.y,actual.x-samLocation.x)*(65536.0f/6.28318530718f)),0};
+        auto turn=NewCheck();rotate(record->level,pawn,{0,0,0},rotation,turn,0,0,0,0);
+        turn=NewCheck();rotate(record->level,ctrl,{0,0,0},rotation,turn,0,0,0,0);
+    }
     swprintf_s(r->map,L"NPC %lu position: %.2f, %.2f, %.2f",record->id,actual.x,actual.y,actual.z);
     r->result=41;
 }
@@ -320,18 +366,24 @@ static void Snapshot(Request* r,DWORD* objects,TrainerCheats::NameFn name,Byte* 
 }
 static bool Process(Request* r,void* view,HMODULE core,HMODULE engine,DWORD* objects) {
     bool list=!wcscmp(r->map,L"--npc-list");
+    int freezeValue=0;
     bool spawnRequest=!wcscmp(r->map,L"--npc-spawn");
     DWORD id=0;Vec destination={};int desiredHealth=0,desiredCondition=0,desiredActivity=0;wchar_t extra=0;
+    bool freeze=swscanf_s(r->map,L"--npc-freeze:%lu:%d%c",&id,&freezeValue,&extra,1)==2;
     bool remove=swscanf_s(r->map,L"--npc-remove:%lu%c",&id,&extra,1)==1;
     bool heal=swscanf_s(r->map,L"--npc-health:%lu:%d%c",&id,&desiredHealth,&extra,1)==2;
     bool condition=swscanf_s(r->map,L"--npc-condition:%lu:%d%c",&id,&desiredCondition,&extra,1)==2;
     bool activity=swscanf_s(r->map,L"--npc-activity:%lu:%d%c",&id,&desiredActivity,&extra,1)==2;
     bool coordinates=swscanf_s(r->map,L"--npc-position:%lu:%f:%f:%f%c",&id,&destination.x,&destination.y,&destination.z,&extra,1)==4;
-    bool front=swscanf_s(r->map,L"--npc-front:%lu%c",&id,&extra,1)==1;
+    int frontMetres=3,frontSlot=0;
+    bool frontProbe=swscanf_s(r->map,L"--npc-front-probe:%lu:%d:%d%c",&id,&frontMetres,&frontSlot,&extra,1)==3;
+    bool front=frontProbe||swscanf_s(r->map,L"--npc-front:%lu:%d:%d%c",&id,&frontMetres,&frontSlot,&extra,1)==3;
+    if(!front){frontMetres=3;frontSlot=0;front=swscanf_s(r->map,L"--npc-front:%lu%c",&id,&extra,1)==1;}
+    if(front&&!MovePlacement::Valid(frontMetres,frontSlot)){r->result=6;return true;}
     bool toSam=swscanf_s(r->map,L"--npc-to-sam:%lu%c",&id,&extra,1)==1;
     bool position=coordinates||front||toSam;
-    if(!list&&!spawnRequest&&!remove&&!heal&&!condition&&!activity&&!position)return false;
-    if((remove||heal||condition||activity||position)&&!id){r->result=6;return true;}
+    if(!list&&!spawnRequest&&!freeze&&!remove&&!heal&&!condition&&!activity&&!position)return false;
+    if((freeze||remove||heal||condition||activity||position)&&!id){r->result=6;return true;}
     if(!SharedRecord()){r->result=7;return true;}
     auto name=reinterpret_cast<TrainerCheats::NameFn>(GetProcAddress(core,"?GetName@UObject@@QBEPBGXZ"));
     auto spawn=reinterpret_cast<SpawnFn>(GetProcAddress(engine,"?SpawnActor@ULevel@@UAEPAVAActor@@PAVUClass@@VFName@@VFVector@@VFRotator@@PAV2@HH4PAVAPawn@@@Z"));
@@ -366,12 +418,16 @@ static bool Process(Request* r,void* view,HMODULE core,HMODULE engine,DWORD* obj
     if(list){Snapshot(r,objects,name,player);return true;}
     if(!level||!possessName){r->result=16;return true;}
     SpawnRecord* record=nullptr;
-    if(remove||heal||condition||activity||position) {
+    if(freeze||remove||heal||condition||activity||position) {
         for(auto& item:registry->records)if(item.id==id)record=&item;
         if(!record||!record->pawn){r->result=22;return true;}
     }
-    if(GetForegroundWindow()!=r->window || IsIconic(r->window)){r->result=14;return true;}
-    if(position){Position(r,record,front?1:toSam?2:0,destination,player,engine,objects,name);return true;}
+    if(!frontProbe&&(GetForegroundWindow()!=r->window || IsIconic(r->window))){r->result=14;return true;}
+    if(freeze){
+        if((freezeValue!=0&&freezeValue!=1)||record->removing){r->result=6;return true;}
+        r->result=TrainerFreeze::Set(record->pawn,freezeValue==1,r->window,static_cast<Byte*>(view))?59:57;return true;
+    }
+    if(position){Position(r,record,front?1:toSam?2:0,destination,player,engine,objects,name,frontMetres,frontSlot,frontProbe);return true;}
     if(activity){Activity(r,record,desiredActivity,player,core,objects,name,find,process);return true;}
     if(condition){Condition(r,record,desiredCondition,objects,name,find,process);return true;}
     if(remove) {

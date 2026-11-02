@@ -303,10 +303,62 @@ Check(!pendingEquipment.Frame.Entries.First(e=>e.Key.StartsWith("equipment-add:"
 equipmentDone.SetResult("Updated");await equipTask;
 Check(!pendingEquipment.Busy&&pendingEquipment.Frame.Title=="WALL MINE","equipment completion preserves the newly browsed item page");
 
+var freezeSnapshots=new List<NpcSnapshot>{Guard(801,false),Guard(802),Guard(803,false) with {ProtectedGlobal=true}};
+var freezeCalls=new List<(string Action,uint Id)>();int thawCalls=0,pingCalls=0;bool thawFails=false;
+using var freezing=new NpcOverlayMenu(()=>Process.GetCurrentProcess(),_=>Task.FromResult<NpcSnapshot[]?>(freezeSnapshots.ToArray()),(_,act,id,hp,c,a)=>{freezeCalls.Add((act,id));return Task.FromResult("Updated");},freezeControl:(_,restore)=>{
+ if(restore){if(thawFails)throw new InvalidOperationException("Request busy");++thawCalls;return Task.FromResult("FROZEN:0");}
+ ++pingCalls;return Task.FromResult("FROZEN:2");});
+await freezing.RefreshAsync(true);freezing.OpenManager();await freezing.ActivateAsync("global-menu");
+Check(!freezing.Frame.Entries.First(e=>e.Key=="global-freeze").On,"global Freeze starts off");
+await freezing.ActivateAsync("global-freeze");
+Check(freezing.Frame.Entries[0].Key=="global-cancel"&&freezeCalls.Count==0,"freezing requires a Cancel-first captured-target confirmation");
+await freezing.ActivateAsync("global-cancel");await freezing.ActivateAsync("global-freeze");
+confirm=freezing.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;await freezing.ActivateAsync(confirm);
+Check(freezeCalls.SequenceEqual(new[]{("freeze",801u),("freeze",802u)})&&freezing.Frame.Entries.First(e=>e.Key=="global-freeze").On,"freeze includes both origins and excludes protected NPCs");
+await freezing.PingFreezeAsync();Check(pingCalls==1,"heartbeat keeps owned freeze active while browsing elsewhere");
+await freezing.ActivateAsync("browse");Check(freezing.Frame.Entries.First(e=>e.Key==Key(801)).Value!.StartsWith("Frozen"),"frozen NPC is marked in browse roster");
+await freezing.ActivateAsync(Key(801));await Reject(()=>freezing.ActivateAsync("condition:2"),"condition edits cannot interrupt a frozen NPC");
+await freezing.ActivateAsync("global-menu");await freezing.ActivateAsync("scope-menu");await freezing.ActivateAsync("scope:1");
+thawFails=true;await Reject(()=>freezing.ActivateAsync("global-freeze"),"failed thaw is reported");
+Check(freezing.Frame.Entries.First(e=>e.Key=="global-freeze").On&&!freezing.Busy,"failed thaw retains ownership for retry and clears busy state");
+thawFails=false;await freezing.ActivateAsync("global-freeze");
+Check(thawCalls==1&&!freezing.Frame.Entries.First(e=>e.Key=="global-freeze").On,"unfreeze restores the captured set even after scope changes");
+await freezing.ActivateAsync("global-freeze");confirm=freezing.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;freezeCalls.Clear();await freezing.ActivateAsync(confirm);
+Check(freezeCalls.SequenceEqual(new[]{("freeze",801u)}),"new freeze capture obeys the selected Map-only scope");
+await freezing.RestoreFrozenAsync();Check(thawCalls==2,"shutdown restoration thaws owned NPCs");
+
+var moveSnapshots=new List<NpcSnapshot>{Guard(901,false),Guard(902,false) with {ProtectedGlobal=true,Weapon="None",InstanceName="NamedMissionNPC"},Guard(903),Guard(904,false) with {Health=0,PawnState="s_Dead",AiState="s_Dead"}};
+var moveCalls=new List<(uint Id,int Metres,int Slot)>();var unrelatedActions=new List<string>();bool refuseFirstMove=false;
+using var moving=new NpcOverlayMenu(()=>Process.GetCurrentProcess(),_=>Task.FromResult<NpcSnapshot[]?>(moveSnapshots.ToArray()),(_,act,id,hp,c,a)=>{unrelatedActions.Add(act);return Task.FromResult("Updated");},frontAction:(_,id,metres,slot)=>{
+ if(refuseFirstMove&&id==901)throw new InvalidOperationException("Position blocked");moveCalls.Add((id,metres,slot));return Task.FromResult("Moved");});
+await moving.RefreshAsync(true);moving.OpenMapRoster();await moving.ActivateAsync(Key(901));await moving.ActivateAsync("position-menu");
+Check(moving.Frame.Entries.First(e=>e.Key=="move-distance-position").Value=="3 m","individual front move defaults to the agreed three metres");
+await moving.ActivateAsync("front");Check(moveCalls[^1]==(901u,3,0),"individual front move uses selected NPC and default distance without spawning");
+await moving.ActivateAsync("move-distance-position");
+Check(moving.Frame.Entries.Where(e=>e.Key.StartsWith("move-distance:")).Select(e=>e.Key).SequenceEqual(new[]{"move-distance:3","move-distance:4","move-distance:5","move-distance:6"}),"distance selector only offers three through six metres");
+await Reject(()=>moving.ActivateAsync("move-distance:2"),"closer-than-three-metre distance rejected");
+await moving.ActivateAsync("move-distance:6");await moving.ActivateAsync("front");Check(moveCalls[^1]==(901u,6,0),"individual front move forwards chosen six metres");
+await moving.ActivateAsync("global-menu");await moving.ActivateAsync("scope-menu");await moving.ActivateAsync("scope:2");
+moveCalls.Clear();await moving.ActivateAsync("move-map-all");
+Check(moving.Frame.Entries[0].Key=="global-cancel"&&moveCalls.Count==0,"move-all captures map NPCs and defaults to Cancel");
+confirm=moving.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;await moving.ActivateAsync(confirm);
+Check(moveCalls.SequenceEqual(new[]{(901u,6,0),(902u,6,1)}),"move-all includes existing named and unarmed map NPCs and excludes spawns and dead NPCs regardless of global condition scope");
+Check(unrelatedActions.Count==0,"move controls never invoke spawn or condition actions");
+await moving.ActivateAsync(Key(902));await moving.ActivateAsync("position-menu");await moving.ActivateAsync("move-exclude");
+await moving.ActivateAsync("global-menu");await moving.ActivateAsync("move-map-all");confirm=moving.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;moveCalls.Clear();await moving.ActivateAsync(confirm);
+Check(moveCalls.SequenceEqual(new[]{(901u,6,0)}),"mission NPCs can be explicitly excluded from group moves");
+await moving.ActivateAsync(Key(902));await moving.ActivateAsync("move-exclude");await moving.ActivateAsync("move-map-all");confirm=moving.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;
+refuseFirstMove=true;moveCalls.Clear();summary=await moving.ActivateAsync(confirm);refuseFirstMove=false;
+Check(moveCalls.SequenceEqual(new[]{(902u,6,1)})&&summary.Contains("1 requested, 0 skipped, 1 failed")&&summary.Contains("Position blocked"),"one blocked destination does not retarget or abort other map moves");
+await moving.ActivateAsync("move-map-all");confirm=moving.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;moveSnapshots.RemoveAll(n=>n.Id==901);moveCalls.Clear();summary=await moving.ActivateAsync(confirm);
+Check(moveCalls.SequenceEqual(new[]{(902u,6,1)})&&summary.Contains("1 skipped"),"disappeared captured map NPC is skipped without substituting a different actor");
+
 namespace SCTrainer {
  internal sealed record GameMenuEntry(string Label,bool On,bool Available,string Key,string? Value=null,bool Toggle=true,bool Navigation=false,GameMenuInput? Input=null);
  internal sealed record GameMenuFrame(string Key,string Title,GameMenuEntry[] Entries);
  internal static class DirectLevelLoader {
+  public static Task<string> MoveNpcFrontAsync(Process game,uint id,int metres,int slot)=>throw new Exception("Unexpected live NPC move");
+  public static Task<string> FreezeControlAsync(Process game,bool restore=false)=>throw new Exception("Unexpected live freeze control");
   public static Task<EquipmentStock[]?> ReadEquipmentAsync(Process game)=>throw new Exception("Unexpected real equipment read");
   public static Task<string> EquipmentActionAsync(Process game,int id,int operation,int quantity)=>throw new Exception("Unexpected real equipment mutation");
   public static void ValidateGame(Process game)=>throw new Exception("Unexpected real game validation in test");

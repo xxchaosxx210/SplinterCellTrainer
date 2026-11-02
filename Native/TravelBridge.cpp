@@ -5,12 +5,13 @@
 #include "EquipmentProtocol.h"
 
 struct Request { DWORD version; DWORD pid; HWND window; LONG result; wchar_t map[128]; };
-static constexpr DWORD Version = 23;
-static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v23";
-static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v23.%lu", pid); }
+static constexpr DWORD Version = 26;
+static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v26";
+static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v26.%lu", pid); }
 
 #ifdef BRIDGE_DLL
 #include "Cheats.h"
+#include "Freeze.h"
 #include "Spawn.h"
 #include "Cameras.h"
 #include "Fighting.h"
@@ -97,6 +98,7 @@ static void Handle(Request* r) {
             return;
         }
         if (TrainerCheats::SafeRequest(r, viewport, core, objects)) return;
+        if (TrainerFreeze::Handle(r,core,objects)) return;
         if (TrainerSpawn::SafeRequest(r, viewport, core, engine, objects)) return;
         if (TrainerCameras::Handle(r, viewport, core, objects)) return;
         if (TrainerFighting::Handle(r, viewport, core, objects)) return;
@@ -189,7 +191,7 @@ static BOOL CALLBACK FindWindow(HWND window, LPARAM context) {
     return TRUE;
 }
 int wmain(int argc, wchar_t** argv) {
-    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.24.0:protocol23"); return 0; }
+    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.26.1:protocol26"); return 0; }
     if (argc != 3) { puts("Expected process ID and map."); return 2; }
     Search search = { wcstoul(argv[1], nullptr, 10), nullptr };
     EnumWindows(FindWindow, reinterpret_cast<LPARAM>(&search));
@@ -252,6 +254,13 @@ int wmain(int argc, wchar_t** argv) {
         UnmapViewOfFile(equipmentData);CloseHandle(equipmentMapping);if(valid)return 0;
     }
     switch (result) {
+    case 62: puts("No walkable floor found at that distance. Move Sam into an open area or choose another distance.");return 34;
+    case 63: puts("A wall blocks that position in front of Sam. Turn toward an open area or choose another distance.");return 35;
+    case 61: wprintf(L"%s\n",requestMap);return 0;
+    case 60: puts("NPC move checks are unavailable for this game script.");return 33;
+    case 57: puts("NPC freeze is unavailable for this game state.");return 32;
+    case 58: wprintf(L"%s\n",requestMap);return 0;
+    case 59: puts("NPC freeze updated.");return 0;
     case 51: wprintf(L"%s\n",requestMap);return 0;
     case 52: puts("Equipment operation is unavailable for this item or game script.");return 28;
     case 53: puts("Give this item to Sam before selecting it.");return 29;

@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include "NpcTrackingPolicy.h"
 
 // Bounded registry of map NPCs and trainer spawns; all access runs on the game thread.
 namespace TrainerSpawn {
@@ -220,6 +221,21 @@ static void DiscoverMap(Byte* level,Byte* info,DWORD* objects,TrainerCheats::Nam
         if(TrainerCheats::IsA(ctrl,L"EAIController")&&!(U(ctrl,0x2c)&0x10)){entry->controller=ctrl;entry->controllerIndex=U(ctrl,4);entry->controllerName=U(ctrl,0x20);}
     }
 }
+// Revival and mission scripts can replace a controller without replacing the pawn.
+// Keep the stable pawn record, but refresh its current reciprocal controller link.
+static void RefreshControllers(DWORD* objects,TrainerCheats::NameFn name) {
+    DWORD pc=Property(objects,name,L"Pawn",L"Controller"),cp=Property(objects,name,L"Controller",L"Pawn");
+    if(!pc||!cp)return;
+    for(auto& item:registry->records){
+        if(!item.pawn||item.removing)continue;
+        auto ctrl=reinterpret_cast<Byte*>(U(item.pawn,pc));
+        bool valid=TrainerCheats::IsA(ctrl,L"EAIController");
+        bool bind=NpcTrackingPolicy::CanBind(valid,valid&&U(ctrl,0x6c)==U(item.pawn,0x6c),
+            valid&&(U(ctrl,0x2c)&0x10)!=0,valid?U(ctrl,cp):0,reinterpret_cast<DWORD>(item.pawn));
+        item.controller=bind?ctrl:nullptr;
+        item.controllerIndex=bind?U(ctrl,4):0;item.controllerName=bind?U(ctrl,0x20):0;
+    }
+}
 static void Position(Request* r,SpawnRecord* record,int mode,Vec destination,Byte* player,HMODULE engine,DWORD* objects,TrainerCheats::NameFn name) {
     auto pawn=record->pawn,ctrl=record->controller;
     DWORD hp=Property(objects,name,L"Pawn",L"Health"),pc=Property(objects,name,L"Pawn",L"Controller"),cp=Property(objects,name,L"Controller",L"Pawn");
@@ -252,12 +268,20 @@ static void Snapshot(Request* r,DWORD* objects,TrainerCheats::NameFn name,Byte* 
     if(!handle){r->result=7;return;}
     auto output=static_cast<NpcSnapshot*>(MapViewOfFile(handle,FILE_MAP_ALL_ACCESS,0,0,sizeof(NpcSnapshot)));
     if(!output){CloseHandle(handle);r->result=7;return;}
-    ZeroMemory(output,sizeof(NpcSnapshot));output->version=2;
+    ZeroMemory(output,sizeof(NpcSnapshot));output->version=3;
     DWORD hp=Property(objects,name,L"Pawn",L"Health"),vel=Property(objects,name,L"Actor",L"Velocity");
     DWORD pawnOffset=Property(objects,name,L"EPlayerController",L"EPawn");
     DWORD movement=Property(objects,name,L"EPawn",L"BaseMoveFlags");
     DWORD weapon=Property(objects,name,L"EPawn",L"CurrentWeapon");
     DWORD targetOffset=Property(objects,name,L"EAIController",L"TargetActorToFire");
+    DWORD protectOffset=0,protectMask=0,hostileOffset=0,hostileMask=0;
+    auto objectTable=reinterpret_cast<Byte**>(objects[0]);
+    for(DWORD i=0;i<objects[1];++i){
+        auto obj=objectTable[i];if(!obj||!TrainerCheats::IsA(obj,L"BoolProperty"))continue;
+        auto owner=reinterpret_cast<Byte*>(U(obj,0x18));if(!TrainerCheats::Alive(owner)||wcscmp(name(owner),L"EPawn"))continue;
+        if(!wcscmp(name(obj),L"bKeepNPCAlive")){protectOffset=U(obj,0x44);protectMask=U(obj,0x54);}
+        if(!wcscmp(name(obj),L"bHostile")){hostileOffset=U(obj,0x44);hostileMask=U(obj,0x54);}
+    }
     auto sam=player&&pawnOffset?reinterpret_cast<Byte*>(U(player,pawnOffset)):nullptr;
     for(auto& item:registry->records) {
         if(!item.id)continue;
@@ -265,6 +289,9 @@ static void Snapshot(Request* r,DWORD* objects,TrainerCheats::NameFn name,Byte* 
         wcscpy_s(n.pawnState,L"None");wcscpy_s(n.aiState,L"None");wcscpy_s(n.weapon,L"None");wcscpy_s(n.target,L"None");
         if(!item.pawn){n.present=0;continue;}
         n.present=1;n.removing=item.removing;
+        // Unknown metadata is protected conservatively; spawned guards remain included.
+        n.protectedGlobal=!item.spawned&&(!protectOffset||!protectMask||!hostileOffset||!hostileMask||
+            (U(item.pawn,protectOffset)&protectMask)||!(U(item.pawn,hostileOffset)&hostileMask));
         auto position=*reinterpret_cast<Vec*>(item.pawn+0xd4);n.x=position.x;n.y=position.y;n.z=position.z;
         wcsncpy_s(n.actorName,name(item.pawn),_TRUNCATE);
         n.moveFlags=movement?*(item.pawn+movement):0;
@@ -335,6 +362,7 @@ static bool Process(Request* r,void* view,HMODULE core,HMODULE engine,DWORD* obj
         }
     }
     DiscoverMap(level,info,objects,name);
+    RefreshControllers(objects,name);
     if(list){Snapshot(r,objects,name,player);return true;}
     if(!level||!possessName){r->result=16;return true;}
     SpawnRecord* record=nullptr;

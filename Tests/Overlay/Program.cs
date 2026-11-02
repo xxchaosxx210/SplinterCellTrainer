@@ -214,11 +214,11 @@ var layoutSnapshots=new List<NpcSnapshot>{Guard(601,false),Guard(602),Guard(603,
 var layoutCalls=new List<uint>();
 using var layout=new NpcOverlayMenu(()=>Process.GetCurrentProcess(),_=>Task.FromResult<NpcSnapshot[]?>(layoutSnapshots.ToArray()),(_,act,id,hp,c,a)=>{layoutCalls.Add(id);if(act=="remove")layoutSnapshots.RemoveAll(n=>n.Id==id);return Task.FromResult("Requested");});
 await layout.RefreshAsync(true);layout.OpenManager();
-Check(layout.Frame.Title=="NPC MANAGER"&&layout.Frame.Entries.Select(e=>e.Key).SequenceEqual(new[]{"spawn","browse","global-menu","cleanup","back"}),"manager root only contains the four main sections and Back");
+Check(layout.Frame.Title=="NPC MANAGER"&&layout.Frame.Entries.Select(e=>e.Key).SequenceEqual(new[]{"npc-esp","spawn","browse","global-menu","cleanup","back"}),"manager root only contains the four main sections and Back");
 await layout.ActivateAsync("browse");
 Check(layout.Frame.Entries.Count(e=>e.Key.StartsWith("npc:"))==3&&layout.Frame.Entries.All(e=>!e.Label.Contains('\n')),"All filter shows compact single-line rows for both origins");
 Check(!layout.Frame.Entries.Any(e=>e.Key=="global-condition"||e.Key=="remove-all"),"browse list contains no global or cleanup actions");
-Check(layout.Frame.Entries.First(e=>e.Key==Key(603)).Value=="Protected","protected NPCs are marked in the compact roster");
+Check(layout.Frame.Entries.First(e=>e.Key==Key(603)).Value!.StartsWith("Protected / "),"protected NPCs are marked in the compact roster");
 await layout.ActivateAsync("filter-menu");await layout.ActivateAsync("filter:1");
 Check(layout.Frame.Entries.Count(e=>e.Key.StartsWith("npc:"))==2&&!layout.Frame.Entries.Any(e=>e.Key==Key(602)),"Map filter only shows map NPCs");
 await layout.ActivateAsync("filter-menu");await layout.ActivateAsync("filter:2");
@@ -244,6 +244,24 @@ await layout.ActivateAsync("remove-menu");await layout.ActivateAsync($"remove-co
 Check(layoutCalls[^1]==602&&!layout.Frame.Entries.Any(e=>e.Key==Key(602)),"confirmed individual removal preserves actor identity and drops the roster row");
 layout.OpenManager();await layout.ActivateAsync("cleanup");await layout.ActivateAsync("remove-all");await layout.ActivateAsync("cancel");
 Check(layout.Frame.Title=="NPC CLEANUP"&&layout.Back()&&layout.Frame.Title=="NPC MANAGER"&&!layout.Back(),"cleanup confirmation returns to cleanup then manager then main menu");
+
+bool espOn=false,espReady=true;int espToggles=0;
+layout.OpenManager();layout.ConfigureEsp(()=>espOn,()=>{espOn=!espOn;++espToggles;return espOn?"ESP enabled":"ESP off";},()=>espReady);
+Check(layout.Frame.Entries[0].Key=="npc-esp"&&!layout.Frame.Entries[0].On&&layout.Frame.Entries[0].Available,"Enemy ESP is first in NPC Manager and reflects its existing state");
+await layout.ActivateAsync("npc-esp");Check(espOn&&espToggles==1&&layout.Frame.Entries[0].On,"manager ESP toggles the shared control exactly once");
+espOn=false;Check(!layout.Frame.Entries[0].On,"manager reads external ESP state changes instead of keeping a separate flag");
+espReady=false;await layout.ActivateAsync("npc-esp");Check(espToggles==1&&!layout.Frame.Entries[0].Available,"ESP obeys shared trainer availability");
+var distanceSnapshots=new[]{Guard(701,false) with {Distance=30},Guard(702) with {Distance=5},Guard(703,false) with {Distance=5}};
+var distanceCalls=new List<uint>();
+using var distances=new NpcOverlayMenu(()=>Process.GetCurrentProcess(),_=>Task.FromResult<NpcSnapshot[]?>(distanceSnapshots),(_,act,id,hp,c,a)=>{distanceCalls.Add(id);return Task.FromResult("Requested");});
+await distances.RefreshAsync(true);distances.OpenManager();await distances.ActivateAsync("browse");
+Check(distances.Frame.Entries.Where(e=>e.Key.StartsWith("npc:")).Select(e=>e.Key).SequenceEqual(new[]{Key(702),Key(703),Key(701)}),"browse sorts nearest first and uses stable ID to break distance ties");
+Check(distances.Frame.Entries.First(e=>e.Key==Key(702)).Value!.EndsWith("5.0 m"),"compact NPC rows show distance to Sam in metres");
+await distances.ActivateAsync(Key(701));distanceSnapshots[0]=distanceSnapshots[0] with {Distance=1};distanceSnapshots[1]=distanceSnapshots[1] with {Distance=100};await distances.RefreshAsync(true);
+await distances.ActivateAsync("health:75");Check(distanceCalls.SequenceEqual(new uint[]{701}),"distance reordering cannot retarget an already selected NPC");distances.Back();
+Check(distances.Frame.Entries.First(e=>e.Key.StartsWith("npc:")).Key==Key(701),"live distance refresh reorders the browser");
+await distances.ActivateAsync("filter-menu");await distances.ActivateAsync("filter:1");Check(distances.Frame.Entries.Where(e=>e.Key.StartsWith("npc:")).Select(e=>e.Key).SequenceEqual(new[]{Key(701),Key(703)}),"Map filter retains nearest-first ordering");
+await distances.ActivateAsync("filter-menu");await distances.ActivateAsync("filter:2");Check(distances.Frame.Entries.Single(e=>e.Key.StartsWith("npc:")).Key==Key(702),"Spawned filter retains its own NPC subset");
 
 namespace SCTrainer {
  internal sealed record GameMenuEntry(string Label,bool On,bool Available,string Key,string? Value=null,bool Toggle=true,bool Navigation=false,GameMenuInput? Input=null);

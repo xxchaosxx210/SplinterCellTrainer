@@ -6,7 +6,7 @@ Windows trainer for the original Tom Clancy's Splinter Cell on Steam, built with
 
 
 
-**Trainer:** v0.23.0 prototype
+**Trainer:** v0.23.1 prototype
 
 **Supported Steam build:** 252083 (App ID 13560)
 
@@ -572,3 +572,8 @@ The user confirmed the v0.22.2 revival tracking fix works in gameplay after test
 ## NPC Manager layout (v0.23.0)
 
 F6 → **NPC Manager** now groups Spawn guard, Browse NPCs, Global controls and Cleanup. Browse uses one-line NPC rows and an All / Map / Spawned filter. Global controls has an independent Map + Spawned / Map / Spawned scope and keeps existing protection, confirmation and per-target validation. Changing the browse filter does not change global scope. Each NPC editor groups Condition, Activity, Health, Position and Details / Rename; position shortcuts live inside Position, and full stats and renaming live inside Details. Cleanup holds bulk spawned-NPC removal. Individual removal now opens a Cancel-first confirmation. Back returns through the current section to NPC Manager and then the main menu.
+
+
+### ESP and proximity browsing (v0.23.1)
+
+Enemy ESP is now the first toggle under F6 → NPC Manager, using the existing ESP implementation and shared state. It has been removed from the main menu. Browse NPCs sorts each All / Map / Spawned filter by current distance to Sam (nearest first), shows distances in metres and breaks ties by stable NPC ID. Live snapshots update the order; selections and edits remain bound to actor IDs. Global batch ordering is unchanged.

@@ -19,6 +19,9 @@ internal sealed class NpcOverlayMenu : IDisposable
         _read=read??DirectLevelLoader.ReadNpcsAsync;
         _action=action??((game,act,id,hp,condition,activity)=>DirectLevelLoader.NpcActionAsync(game,act,id,hp,condition,activity,waitForCompletion:false));
     }
+    private Func<bool>? _readEsp,_canToggleEsp;
+    private Func<string>? _toggleEsp;
+    public void ConfigureEsp(Func<bool> read,Func<string> toggle,Func<bool> available){_readEsp=read;_toggleEsp=toggle;_canToggleEsp=available;}
     private enum Page { Spawn, Roster, Edit, Condition, Activity, Health, Position, Details, RemoveAll, GlobalCondition, GlobalActivity, GlobalConfirm, Global, Filter, Scope, Cleanup, RemoveOne }
     private Page _page;
     private sealed record GlobalEdit(int Pid,uint[] Ids,NpcConditionEdit? Condition,NpcActivityEdit? Activity,string Label,Page Parent,int Token,string Scope);
@@ -63,6 +66,7 @@ internal sealed class NpcOverlayMenu : IDisposable
             string title="NPC MANAGER";
             switch(_page) {
                 case Page.Spawn:
+                    rows.Add(new("Enemy ESP",_readEsp?.Invoke()==true,!Busy&&_toggleEsp is not null&&_canToggleEsp?.Invoke()==true,"npc-esp"));
                     rows.Add(Row("Spawn guard","spawn",ready&&Spawned.Length<8,$"{Spawned.Length} / 8"));
                     rows.Add(Row("Browse NPCs","browse",navigation:true));
                     rows.Add(Row("Global controls","global-menu",navigation:true));
@@ -71,9 +75,10 @@ internal sealed class NpcOverlayMenu : IDisposable
                 case Page.Roster:
                     title="BROWSE NPCs"+(_stale?" / UPDATING":"");
                     rows.Add(Row("Filter","filter-menu",value:_filter==NpcScope.All?"All":ScopeLabel(_filter),navigation:true));
-                    var roster=_npcs.Where(n=>InScope(n,_filter)).ToArray();
+                    var roster=_npcs.Where(n=>InScope(n,_filter)).OrderBy(n=>float.IsFinite(n.Distance)&&n.Distance>=0?n.Distance:float.PositiveInfinity).ThenBy(n=>n.Id).ToArray();
                     foreach(var npc in roster)rows.Add(Row(DisplayName(npc),$"npc:{_game?.Id??0}:{npc.Id}",!_stale,
-                        npc.ProtectedGlobal?"Protected":_globalExcluded.Contains(npc.Id)?"Excluded":npc.Condition,true));
+                        (npc.ProtectedGlobal?"Protected":_globalExcluded.Contains(npc.Id)?"Excluded":npc.Condition)+
+                        (float.IsFinite(npc.Distance)&&npc.Distance>=0?$" / {npc.Distance:0.0} m":" / -- m"),true));
                     if(roster.Length==0)rows.Add(Row(_stale?"Load a mission to connect":"No NPCs in this filter","empty",false,""));
                     break;
                 case Page.Filter:
@@ -218,6 +223,10 @@ internal sealed class NpcOverlayMenu : IDisposable
     }
     public async Task<string> ActivateAsync(string key)
     {
+        if(key=="npc-esp"){
+            if(Busy||_toggleEsp is null||_canToggleEsp?.Invoke()!=true)return "Wait for the current trainer update to finish.";
+            return _toggleEsp();
+        }
         if(key is "browse" or "global-menu" or "cleanup" or "filter-menu" or "scope-menu"){
             _global=null;
             _page=key switch {"browse"=>Page.Roster,"global-menu"=>Page.Global,"cleanup"=>Page.Cleanup,"filter-menu"=>Page.Filter,_=>Page.Scope};return "";

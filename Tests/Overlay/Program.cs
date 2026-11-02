@@ -294,7 +294,7 @@ equipment.Back();equipment.Back();await equipment.ActivateAsync("equipment-categ
 Check(!equipment.Frame.Entries.Any(e=>e.Key.StartsWith("equipment-set:"))&&equipment.Frame.Entries.Count(e=>e.Key.StartsWith("equipment-add:"))==1,"weapons offer one grant rather than stack quantity controls");
 Check(equipment.Back()&&equipment.Back()&&!equipment.Back(),"equipment Back navigation returns through category to root then main");
 var equipmentStarted=new TaskCompletionSource<bool>();var equipmentDone=new TaskCompletionSource<string>();
-using var pendingEquipment=new EquipmentMenu(()=>Process.GetCurrentProcess(),_=>Task.FromResult<EquipmentStock[]?>(equipmentStock),(_,id,op,q)=>{equipmentStarted.TrySetResult(true);return equipmentDone.Task;});
+using var pendingEquipment=new EquipmentMenu(()=>Process.GetCurrentProcess(),_=>Task.FromResult<EquipmentStock[]?>(equipmentStock),async (_,id,op,q)=>{equipmentStarted.TrySetResult(true);var reply=await equipmentDone.Task;equipmentStock[id-1]=equipmentStock[id-1] with {Quantity=equipmentStock[id-1].Quantity+q};return reply;});
 await pendingEquipment.RefreshAsync(true);await pendingEquipment.ActivateAsync("equipment-category:1");await pendingEquipment.ActivateAsync("equipment-item:3");
 var equipTask=pendingEquipment.ActivateAsync($"equipment-add:{Environment.ProcessId}:3:1");await equipmentStarted.Task;
 Check(pendingEquipment.Busy&&pendingEquipment.Back()&&pendingEquipment.Back(),"equipment navigation stays available during a pending mutation");
@@ -352,6 +352,21 @@ refuseFirstMove=true;moveCalls.Clear();summary=await moving.ActivateAsync(confir
 Check(moveCalls.SequenceEqual(new[]{(902u,6,1)})&&summary.Contains("1 requested, 0 skipped, 1 failed")&&summary.Contains("Position blocked"),"one blocked destination does not retarget or abort other map moves");
 await moving.ActivateAsync("move-map-all");confirm=moving.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;moveSnapshots.RemoveAll(n=>n.Id==901);moveCalls.Clear();summary=await moving.ActivateAsync(confirm);
 Check(moveCalls.SequenceEqual(new[]{(902u,6,1)})&&summary.Contains("1 skipped"),"disappeared captured map NPC is skipped without substituting a different actor");
+
+var failedGrantStock=EquipmentStock.Parse(stockText);
+using var missingGrant=new EquipmentMenu(()=>Process.GetCurrentProcess(),_=>Task.FromResult<EquipmentStock[]?>(failedGrantStock),(_,id,op,q)=>Task.FromResult("Success"));
+await missingGrant.RefreshAsync(true);await missingGrant.ActivateAsync("equipment-category:2");await missingGrant.ActivateAsync("equipment-item:8");
+await Reject(()=>missingGrant.ActivateAsync($"equipment-add:{Environment.ProcessId}:8:1"),"grant success is rejected when the item never reaches Sam's inventory");
+Check(!missingGrant.Busy,"failed grant verification clears the pending state");
+failedGrantStock[7]=new(8,true,1,3);
+await Reject(()=>missingGrant.ActivateAsync($"equipment-add:{Environment.ProcessId}:8:1"),"unchanged quantity cannot be reported as a successful Give");
+failedGrantStock[7]=new(8,true,3,3);await missingGrant.RefreshAsync(true);
+Check(!missingGrant.Frame.Entries.First(e=>e.Key.StartsWith("equipment-add:")).Available,"full Wall Mine stack disables Give with an explicit game-limit label");
+string fullReply=await missingGrant.ActivateAsync($"equipment-add:{Environment.ProcessId}:8:1");Check(fullReply.Contains("game's limit"),"direct Give on a full stack explains why the quantity cannot increase");
+var clampedStock=EquipmentStock.Parse(stockText);clampedStock[7]=new(8,true,1,3);
+using var clampedGrant=new EquipmentMenu(()=>Process.GetCurrentProcess(),_=>Task.FromResult<EquipmentStock[]?>(clampedStock),(_,id,op,q)=>{clampedStock[id-1]=new(id,true,3,3);return Task.FromResult("Updated");});
+await clampedGrant.RefreshAsync(true);await clampedGrant.ActivateAsync("equipment-category:2");await clampedGrant.ActivateAsync("equipment-item:8");
+string clampReply=await clampedGrant.ActivateAsync($"equipment-add:{Environment.ProcessId}:8:5");Check(clampReply.Contains("3 / 3 confirmed"),"Give 5 verifies the actual capped three-mine inventory count");
 
 namespace SCTrainer {
  internal sealed record GameMenuEntry(string Label,bool On,bool Available,string Key,string? Value=null,bool Toggle=true,bool Navigation=false,GameMenuInput? Input=null);

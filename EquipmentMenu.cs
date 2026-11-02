@@ -51,8 +51,9 @@ internal sealed class EquipmentMenu : IDisposable
         else{
             var item=Catalog.Single(i=>i.Id==_item);var stock=Stock(_item);string key=$"{_game?.Id??0}:{_item}";title=item.Name.ToUpperInvariant();
             rows.Add(Row(_stale?"Inventory unavailable":stock?.Owned==true?$"Quantity: {stock.Quantity} / {stock.Maximum}":"Not owned","equipment-info",false,""));
-            rows.Add(Row(item.Stackable?"Give 1":"Give item","equipment-add:"+key+":1",ready));
-            if(item.Stackable){rows.Add(Row("Give 5","equipment-add:"+key+":5",ready));
+            bool full=stock?.Owned==true&&stock.Maximum>0&&stock.Quantity>=stock.Maximum;
+            rows.Add(Row(full?"At game limit":item.Stackable?"Give 1":"Give item","equipment-add:"+key+":1",ready&&!full));
+            if(item.Stackable){rows.Add(Row("Give 5","equipment-add:"+key+":5",ready&&!full));
                 rows.Add(new("Set quantity",false,ready,"equipment-set:"+key,null,false,false,new("Item quantity (game limit applies)",Math.Clamp(stock?.Quantity??1,1,999).ToString(CultureInfo.InvariantCulture),MenuInputKind.Quantity,3)));}
             rows.Add(Row("Equip / select","equipment-select:"+key+":0",ready&&stock?.Owned==true&&stock.Quantity>0));
         }
@@ -77,8 +78,18 @@ internal sealed class EquipmentMenu : IDisposable
             while(Refreshing){await Task.Delay(25);if(_disposed)throw new InvalidOperationException("Equipment menu closed.");}
             var game=Game();if(game.Id!=pid)throw new InvalidOperationException("The game session changed. Select the item again.");
             await RefreshAsync(true);
+            var before=Stock(itemId);
+            if(op==0&&before?.Owned==true&&before.Maximum>0&&before.Quantity>=before.Maximum)return $"Already at the game's limit: {before.Quantity} / {before.Maximum}.";
             if(op==2&&Stock(itemId)?.Owned!=true)throw new InvalidOperationException("Give this item to Sam first.");
-            string result=await _action(game,itemId,op,quantity);await RefreshAsync(true);return result;
+            string result=await _action(game,itemId,op,quantity);await RefreshAsync(true);
+            if(op!=2){
+                var after=Stock(itemId);
+                if(after?.Owned!=true||after.Quantity<1||after.Maximum<1)throw new InvalidOperationException("Grant not confirmed: the item is missing from Sam's inventory. No success was confirmed.");
+                int target=Math.Min(after.Maximum,op==0?(before?.Owned==true?before.Quantity:0)+quantity:quantity);
+                if(after.Quantity!=target)throw new InvalidOperationException($"Inventory update not confirmed: requested {target}, but the game reports {after.Quantity}. Check whether Unlimited gadgets is overriding quantities.");
+                return $"{Catalog.Single(i=>i.Id==itemId).Name}: {after.Quantity} / {after.Maximum} confirmed in Sam's inventory.";
+            }
+            return result;
         }finally{Busy=false;}
     }
     public void Dispose(){_disposed=true;_game?.Dispose();}

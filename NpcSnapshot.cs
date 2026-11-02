@@ -18,7 +18,7 @@ public enum NpcActivityEdit { Idle=1, Walking=2, Running=3, Searching=4, Alerted
 public enum NpcConditionEdit { Alive=1, KnockedOut=2, Dead=3 }
 
 public sealed record NpcSnapshot(uint Id, bool Present, bool Removing, bool Controller, uint MoveFlags, int Health,
-    float Speed, float Distance, string Type, string PawnState, string AiState, string Weapon, string Target, bool TrainerSpawned=true, float X=0,float Y=0,float Z=0,string InstanceName="")
+    float Speed, float Distance, string Type, string PawnState, string AiState, string Weapon, string Target, bool TrainerSpawned=true, float X=0,float Y=0,float Z=0,string InstanceName="",bool ProtectedGlobal=false)
 {
     private bool StateIs(params string[] states) => states.Any(s =>
         s.Equals(PawnState, StringComparison.OrdinalIgnoreCase) || s.Equals(AiState, StringComparison.OrdinalIgnoreCase));
@@ -27,11 +27,11 @@ public sealed record NpcSnapshot(uint Id, bool Present, bool Removing, bool Cont
         StateIs("s_Unconscious", "s_InitiallyUnconscious", "s_Electrocuted") ? "Knocked out" :
         StateIs("s_Dead", "s_Dying", "s_InitiallyDead") ? "Dead" : Health > 0 ? "Alive" : "Incapacitated";
 
-    public string Movement => Condition != "Alive" ? "—" : !float.IsFinite(Speed) ? "Unknown" :
+    public string Movement => Condition != "Alive" ? "â€”" : !float.IsFinite(Speed) ? "Unknown" :
         Speed < 5 ? "Stationary" : MoveFlags is 4 or 6 or 9 ? "Running" :
         MoveFlags is 1 or 2 or 3 or 5 or 11 ? "Walking" : "Moving";
 
-    public string Activity => Condition != "Alive" ? "—" : StateIs("s_Stunned") ? "Stunned" :
+    public string Activity => Condition != "Alive" ? "â€”" : StateIs("s_Stunned") ? "Stunned" :
         StateIs("s_Grabbed") ? "Grabbed" : StateIs("s_Carried") ? "Carried" :
         StateIs("s_Investigate") ? "Searching" : StateIs("s_Alert") ? "Alerted" :
         StateIs("s_ClimbLadder", "s_ClimbLadderNEW") ? "Climbing" :
@@ -58,14 +58,14 @@ public sealed record NpcSnapshot(uint Id, bool Present, bool Removing, bool Cont
     public static NpcSnapshot[] Parse(string response)
     {
         var lines = response.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        if (lines.Length == 0 || lines[0] != "NPCS:2" || lines.Length > 257)
+        if (lines.Length == 0 || lines[0] != "NPCS:3" || lines.Length > 257)
             throw new FormatException("Invalid NPC snapshot. Restart using Launch Trainer.cmd.");
         var result = new List<NpcSnapshot>();
         var ids = new HashSet<uint>();
         foreach (var line in lines.Skip(1))
         {
             var p = line.Split('|');
-            if (p.Length != 18) throw new FormatException("Incomplete NPC snapshot.");
+            if (p.Length != 19) throw new FormatException("Incomplete NPC snapshot.");
             uint id = uint.Parse(p[0], CultureInfo.InvariantCulture);
             bool Flag(int i) => p[i] switch { "0" => false, "1" => true, _ => throw new FormatException("Invalid NPC flag.") };
             float Number(int i) => float.TryParse(p[i], NumberStyles.Float, CultureInfo.InvariantCulture, out var n) && float.IsFinite(n) && n >= 0
@@ -73,7 +73,7 @@ public sealed record NpcSnapshot(uint Id, bool Present, bool Removing, bool Cont
             if (id == 0 || !ids.Add(id)) throw new FormatException("Invalid NPC identity.");
             var position=NpcPosition.Parse(p[14],p[15],p[16]);
             result.Add(new(id, Flag(1), Flag(2), Flag(3), uint.Parse(p[4], CultureInfo.InvariantCulture), int.Parse(p[5], CultureInfo.InvariantCulture),
-                Number(6), Number(7), p[8], p[9], p[10], p[11], p[12], Flag(13),position.X,position.Y,position.Z,p[17]));
+                Number(6), Number(7), p[8], p[9], p[10], p[11], p[12], Flag(13),position.X,position.Y,position.Z,p[17],Flag(18)));
         }
         return result.ToArray();
     }

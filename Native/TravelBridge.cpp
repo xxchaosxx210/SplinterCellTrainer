@@ -4,14 +4,15 @@
 #include "NpcProtocol.h"
 
 struct Request { DWORD version; DWORD pid; HWND window; LONG result; wchar_t map[128]; };
-static constexpr DWORD Version = 18;
-static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v18";
-static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v18.%lu", pid); }
+static constexpr DWORD Version = 22;
+static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v22";
+static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v22.%lu", pid); }
 
 #ifdef BRIDGE_DLL
 #include "Cheats.h"
 #include "Spawn.h"
 #include "Cameras.h"
+#include "Fighting.h"
 #ifdef SC_TRAVEL_DIAGNOSTICS
 static wchar_t faultPath[MAX_PATH];
 static LONG faultCount = 0;
@@ -96,6 +97,7 @@ static void Handle(Request* r) {
         if (TrainerCheats::SafeRequest(r, viewport, core, objects)) return;
         if (TrainerSpawn::SafeRequest(r, viewport, core, engine, objects)) return;
         if (TrainerCameras::Handle(r, viewport, core, objects)) return;
+        if (TrainerFighting::Handle(r, viewport, core, objects)) return;
         if (!wcscmp(r->map, L"--health-on") || !wcscmp(r->map, L"--health-off")) {
             bool enable = !wcscmp(r->map, L"--health-on");
             auto getName = reinterpret_cast<const wchar_t* (__thiscall*)(void*)>(GetProcAddress(core, "?GetName@UObject@@QBEPBGXZ"));
@@ -184,7 +186,7 @@ static BOOL CALLBACK FindWindow(HWND window, LPARAM context) {
     return TRUE;
 }
 int wmain(int argc, wchar_t** argv) {
-    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.20.0:protocol18"); return 0; }
+    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.22.2:protocol22"); return 0; }
     if (argc != 3) { puts("Expected process ID and map."); return 2; }
     Search search = { wcstoul(argv[1], nullptr, 10), nullptr };
     EnumWindows(FindWindow, reinterpret_cast<LPARAM>(&search));
@@ -222,12 +224,12 @@ int wmain(int argc, wchar_t** argv) {
     UnmapViewOfFile(request); CloseHandle(mapping); FreeLibrary(dll);
     if (!sent) { puts("Game did not respond; map load not confirmed. Do not retry until responsive."); return 6; }
     if(npcData) {
-        bool valid=sent&&result==32&&npcData->version==2&&npcData->count<=256;
+        bool valid=sent&&result==32&&npcData->version==3&&npcData->count<=256;
         if(valid) {
-            puts("NPCS:2");
+            puts("NPCS:3");
             for(DWORD i=0;i<npcData->count;++i) {
                 auto& n=npcData->entries[i];
-                wprintf(L"%lu|%lu|%lu|%lu|%lu|%d|%.2f|%.2f|%s|%s|%s|%s|%s|%lu|%.3f|%.3f|%.3f|%s\n",n.id,n.present,n.removing,n.controller,n.moveFlags,n.health,n.speed,n.distance,n.type,n.pawnState,n.aiState,n.weapon,n.target,n.spawned,n.x,n.y,n.z,n.actorName);
+                wprintf(L"%lu|%lu|%lu|%lu|%lu|%d|%.2f|%.2f|%s|%s|%s|%s|%s|%lu|%.3f|%.3f|%.3f|%s|%lu\n",n.id,n.present,n.removing,n.controller,n.moveFlags,n.health,n.speed,n.distance,n.type,n.pawnState,n.aiState,n.weapon,n.target,n.spawned,n.x,n.y,n.z,n.actorName,n.protectedGlobal);
             }
         }
         UnmapViewOfFile(npcData);CloseHandle(npcMapping);
@@ -237,6 +239,8 @@ int wmain(int argc, wchar_t** argv) {
     case 1: puts("Map travel queued on the game thread."); return 0;
     case 11: wprintf(L"STATE:%s\n", requestMap); return 0;
     case 12: puts("STATE:loading"); return 0;
+    case 48: wprintf(L"%s\n", requestMap); return 0;
+    case 49: puts("Guard combat is unavailable for the loaded AI scripts. No attack orders were issued."); return 27;
     case 46: wprintf(L"%s\n", requestMap); return 0;
     case 47: puts("Camera deactivation is unavailable for the loaded scripts. No cameras were changed."); return 26;
     case 45: puts("Quiet lights out is unavailable for the loaded lighting properties. No lights were changed."); return 25;

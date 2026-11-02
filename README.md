@@ -6,7 +6,7 @@ Windows trainer for the original Tom Clancy's Splinter Cell on Steam, built with
 
 
 
-**Trainer:** v0.20.0 prototype
+**Trainer:** v0.22.2 prototype
 
 **Supported Steam build:** 252083 (App ID 13560)
 
@@ -286,7 +286,7 @@ states remain visible by their raw names; Alerted is not assumed to mean shootin
 
 Rename changes only the display name in the current manager window. Set health
 
-(1–100) and Restore health affect only a living, conscious selected NPC. They do
+(1â€“100) and Restore health affect only a living, conscious selected NPC. They do
 
 not revive corpses or knocked-out actors. Remove selected NPC preserves the v0.6.2
 
@@ -470,7 +470,7 @@ Live bulk-removal verification also passed: confirmation defaulted to Cancel, co
 
 ## Responsive NPC navigation and map roster (v0.14.0)
 
-**F6 → Map NPCs** lists NPCs present in the active map using their instance names, condition and activity. Select one for condition, activity, health presets or movement in front of Sam. Unsupported state transitions remain unavailable; map NPC removal is blocked in both the overlay and native helper. Spawned NPCs remain in their separate roster, and only present spawned NPCs count towards the eight-spawn limit.
+**F6 â†’ Map NPCs** lists NPCs present in the active map using their instance names, condition and activity. Select one for condition, activity, health presets or movement in front of Sam. Unsupported state transitions remain unavailable; map NPC removal is blocked in both the overlay and native helper. Spawned NPCs remain in their separate roster, and only present spawned NPCs count towards the eight-spawn limit.
 
 Condition changes in the overlay return after the game accepts the request; they do not hold the menu while knockout/revival animations finish. Live polling shows the actual changing condition. Back, roster selection and submenu browsing remain available while any NPC action is pending, while overlapping mutations are blocked until the current native request returns. Each mutation captures its actor ID before awaiting so browsing to a different NPC cannot retarget it. The desktop manager retains its existing confirmation behavior.
 
@@ -480,13 +480,13 @@ Live v0.19.0 verification in Tbilisi: the named map roster populated and keyboar
 
 ## Overlay level loading (v0.15.0)
 
-**F6 → Load level → mission → map section → confirm** loads an installed map through the same safe loader as the desktop window. Cancel is selected first in the confirmation page. Loading is still restricted to the game's main menu; active-mission travel remains blocked. The user confirmed successful live loading through the overlay.
+**F6 â†’ Load level â†’ mission â†’ map section â†’ confirm** loads an installed map through the same safe loader as the desktop window. Cancel is selected first in the confirmation page. Loading is still restricted to the game's main menu; active-mission travel remains blocked. The user confirmed successful live loading through the overlay.
 
 ## Remaining desktop controls in the overlay (v0.16.0)
 
 - **Movement speed** opens a submenu with an enable toggle and 0.5x, 1x, 1.5x, 2x and 3x multipliers. Choosing a multiplier while disabled stores it; choosing one while enabled updates the existing speed cheat without changing other options.
 - Each NPC editor now includes **Rename**, **Detailed stats**, and a **Position** submenu with X/Y/Z drafts, Apply XYZ position, Use current position, In front of Sam and Move to Sam. Draft edits do not move the NPC until Apply is selected. Rename changes the overlay display label for this process/session, not the actor's engine name.
-- **Health → Custom health** accepts any whole value from 1 to 100 as well as the existing presets. **Detailed stats** shows origin/type, engine instance name, health, condition, activity, movement, distance, weapon, XYZ, pawn/AI states, target and controller attachment.
+- **Health â†’ Custom health** accepts any whole value from 1 to 100 as well as the existing presets. **Detailed stats** shows origin/type, engine instance name, health, condition, activity, movement, distance, weapon, XYZ, pawn/AI states, target and controller attachment.
 - **Trainer tools / About / Exit** contains game detection refresh, connection testing, trainer version, supported Steam build/App ID, and an exit confirmation. Exit uses the existing close/cheat-restoration handler and leaves the game running.
 
 For text fields, press Enter to edit, type the value, then Enter to apply or Escape to cancel. The initial value is selected so typing replaces it. Ctrl+A selects all; Left/Right, Home/End, Backspace and Delete edit the draft. Use a dot for decimal coordinates. F6 closes and cancels a draft; switching away from the game also cancels it. While editing, typing is consumed by the overlay instead of reaching gameplay. The trainer process must remain running to provide the overlay.
@@ -507,7 +507,7 @@ Verification: clean build; overlay/cheat regression checks; STA lifecycle checks
 
 ## Bypass locks (v0.18.0)
 
-Enable **F6 → Bypass locks**, close the overlay, then use the game's normal interaction:
+Enable **F6 â†’ Bypass locks**, close the overlay, then use the game's normal interaction:
 
 - Nearby ordinary, usable, closed swinging doors with knob openers are temporarily treated as unlocked, so Open Door skips the lockpick minigame. Keypad/retinal opener doors, unusable doors and distant locks are excluded from this direct unlock path. Explicitly linked ordinary door leaves are handled together.
 - When Sam actually starts using a keypad, his active EKeyPadInteraction is checked before the keypad enters its existing s_AccessGranted state. The game's own code handles access feedback, mission events and linked-door unlocking. Codes are neither rewritten nor entered by the trainer, and NPC/idle keypad interactions are excluded. After access is granted, use the door normally.
@@ -519,7 +519,7 @@ Validation: clean native/WPF build, native policy checks for scope/restoration/p
 
 ## Quiet lights out (v0.19.0)
 
-Enable **F6 → Quiet lights out**, then close the overlay to inspect the level. Toggle it off to restore surviving lights. The feature suppresses supported Light/ELight and EGamePlayObjectLight actors throughout the active level, while skipping player/inventory-owned lighting and deleted actors. It changes output type/brightness, glow and beam flags, and prevents automatic initial-type restoration while active. Renderer cache flags are invalidated using reflected fields; no damage, sound, trigger, switch-state or Level.AddChange functions are called.
+Enable **F6 â†’ Quiet lights out**, then close the overlay to inspect the level. Toggle it off to restore surviving lights. The feature suppresses supported Light/ELight and EGamePlayObjectLight actors throughout the active level, while skipping player/inventory-owned lighting and deleted actors. It changes output type/brightness, glow and beam flags, and prevents automatic initial-type restoration while active. Renderer cache flags are invalidated using reflected fields; no damage, sound, trigger, switch-state or Level.AddChange functions are called.
 
 Original output values are retained by actor pointer, object index, name and level identity. New nonzero output values written by the game while enabled are remembered before being suppressed. Disabling, heartbeat expiry and normal trainer exit restore surviving identities whose values are still muted. Known destroyed fixture states are not relit. Physical meshes, collision, health, alarm flags and AI state are unchanged by this feature.
 
@@ -532,8 +532,38 @@ Validation: clean native/WPF build, native light scope/restoration policy checks
 
 ## Disable all security cameras (v0.20.0)
 
-F6 → **Disable all security cameras** → Enter. This one-shot action deactivates security cameras in the current mission, including unbreakable security cameras, and reports the count. It uses the camera's scripted `s_Deactivated` state while suppressing its disable sound and AI change notification; it does not damage or destroy cameras. Sam's camera and sticky cameras are excluded. Destroyed/jammed cameras are left alone. Already deactivated cameras are counted separately.
+F6 â†’ **Disable all security cameras** â†’ Enter. This one-shot action deactivates security cameras in the current mission, including unbreakable security cameras, and reports the count. It uses the camera's scripted `s_Deactivated` state while suppressing its disable sound and AI change notification; it does not damage or destroy cameras. Sam's camera and sticky cameras are excluded. Destroyed/jammed cameras are left alone. Already deactivated cameras are counted separately.
 
 Load a mission first. Reloading a level or later mission scripts can restore cameras; use the action again if needed. Existing alarms are not cleared. Gameplay verification is pending.
 
 Implementation reference: EnhancedSC's `EBaseCam.uc` and `ESensor.uc` (EchelonIngredient), matching the supported game's reflected classes.
+
+
+## Enemies fight each other (v0.21.0, experimental)
+
+F6 â†’ **Enemies fight each other (30s)** â†’ Enter. Issues a standard 30-second `GOAL_Attack` order to each eligible armed, conscious hostile guard, targeting the nearest eligible guard within 2,000 game units. Includes map NPCs and trainer spawns. Sam, civilians, unconscious/dead NPCs, and guards in special interaction states are excluded. At least two nearby eligible guards are needed. The result reports how many orders were issued.
+
+v0.21.1 keeps a bounded 30-second game-thread session that revalidates participants, redirects attack goals and firing targets away from Sam, clears player-seen flags, and chooses a new opponent when needed. It does not change NPC health. The session expires automatically; after it expires normal AI can target Sam again. Gunfire, injuries and deaths can still trigger normal mission consequences. Reload a previous save to undo those consequences. Live gameplay verification is pending.
+
+Source references: EnhancedSC `EAIController.uc`, `EPattern.uc`, and Engine `EchelonEnums.uc`; input layouts are checked against the loaded game's reflection data before issuing orders.
+
+
+## Global map NPC editing (v0.22.0)
+
+F6 â†’ Map NPCs â†’ **Global condition (all map NPCs)** or **Global activity (all map NPCs)**. Select an action, then confirm; Cancel is selected first. Condition options are Alive / revive (knocked-out NPCs only), Knocked out, and Dead. Activity options match individual editing: idle / guard, walk, run, search the point in front of Sam, and alerted. Dead NPCs cannot be revived by this feature.
+
+Eligible map and trainer-spawned NPCs captured when the action is selected are included; automatic and manual protections are excluded. Every target is refreshed and checked again before its individual request; disappeared or ineligible NPCs are skipped. A summary reports requested, skipped and failed edits. Requests run sequentially; navigation remains available while the batch completes. Keep gameplay unpaused for transitions to finish. Mission consequences still apply. Live gameplay verification is pending.
+
+
+### Global edit targeting (v0.22.1)
+
+Global condition and activity now include both map and trainer-spawned NPCs. The global controls are available from either roster. Map NPCs with `bKeepNPCAlive`, non-hostile map NPCs, and map NPCs whose protection metadata cannot be resolved are excluded automatically. Individual editing remains available. An NPC editor also provides **Exclude from global edits**, remembered for the current game process.
+
+Mission scripts can protect characters without these flags. These checks cannot guarantee every mission-critical character is detected; manually exclude any additional required NPC before a global edit. Protection is checked again for every batch request. Gameplay verification is pending.
+
+
+### Revival tracking fix (v0.22.2)
+
+NPC snapshots and actions refresh each surviving pawn's current controller reference, validating its class, level and reciprocal pawn link. Revival or mission-script controller replacement no longer leaves the trainer using a stale controller. Pawn IDs, origin, custom names and manual global exclusions remain unchanged. A detached controller is reported unavailable until a valid controller attaches. NPCs actually in `s_Groggy` remain reviving until the game finishes recovery.
+
+The user confirmed the v0.22.2 revival tracking fix works in gameplay after testing global NPC edits.

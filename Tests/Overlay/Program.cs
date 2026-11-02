@@ -63,7 +63,7 @@ var mapSnapshots=new[]{Guard(44,false) with {InstanceName="MapGuard44"},Guard(45
 var pendingAction=new TaskCompletionSource<string>();var actionStarted=new TaskCompletionSource<uint>();uint editedId=0;
 using var maps=new NpcOverlayMenu(()=>Process.GetCurrentProcess(),_=>Task.FromResult<NpcSnapshot[]?>(mapSnapshots),(_,action,id,hp,c,a)=>{editedId=id;actionStarted.TrySetResult(id);return pendingAction.Task;});
 await maps.RefreshAsync(true);maps.OpenMapRoster();
-Check(maps.Frame.Title=="MAP NPCs"&&maps.Frame.Entries.Count(e=>e.Key.StartsWith("npc:"))==2&&maps.Frame.Entries[0].Label.StartsWith("MapGuard44"),"map roster shows named map NPCs separately from spawned guards");
+Check(maps.Frame.Title=="MAP NPCs"&&maps.Frame.Entries.Count(e=>e.Key.StartsWith("npc:"))==2&&maps.Frame.Entries.First(e=>e.Key==Key(44)).Label.StartsWith("MapGuard44"),"map roster shows named map NPCs separately from spawned guards");
 await maps.ActivateAsync(Key(44));
 Check(!maps.Frame.Entries.First(e=>e.Key=="remove").Available,"map NPC removal stays disabled in editor");
 await Reject(()=>maps.ActivateAsync("remove"),"map NPC remove action is rejected before native code");
@@ -129,6 +129,85 @@ await editable.ActivateAsync("to-sam");Check(editCalls[^1].Action=="to-sam"&&edi
 await editable.ActivateAsync("details");Check(editable.Frame.Entries.Any(e=>e.Label.StartsWith("Weapon:"))&&editable.Frame.Entries.Any(e=>e.Label.StartsWith("AI state:"))&&editable.Frame.Entries.Any(e=>e.Label.StartsWith("Target:")),"detailed NPC stats include weapon, AI state and target");
 await editable.ActivateAsync(Key(72));await editable.ActivateAsync($"custom-health:{Environment.ProcessId}:71:37");
 Check(editCalls[^1]==("health",71,37),"captured text input cannot accidentally edit the newly selected NPC");
+
+// Global edits operate on a confirmed, stable set of map NPC IDs.
+var globalSnapshots=new List<NpcSnapshot>{Guard(101,false),Guard(102,false),Guard(103) with {ProtectedGlobal=true},Guard(104,false) with {PawnState="s_Unconscious",AiState="s_Unconscious"},Guard(105,false) with {Health=0,PawnState="s_Dead",AiState="s_Dead"}};
+var globalCalls=new List<(string Action,uint Id,NpcConditionEdit? Condition,NpcActivityEdit? Activity)>();
+bool failGlobal=false;
+using var global=new NpcOverlayMenu(()=>Process.GetCurrentProcess(),_=>Task.FromResult<NpcSnapshot[]?>(globalSnapshots.ToArray()),(_,act,id,hp,c,a)=>{
+ if(failGlobal&&id==101)throw new InvalidOperationException("Native state refusal");
+ globalCalls.Add((act,id,c,a));return Task.FromResult("Requested");
+});
+await global.RefreshAsync(true);global.OpenMapRoster();
+Check(global.Frame.Entries.Any(e=>e.Key=="global-condition")&&global.Frame.Entries.Any(e=>e.Key=="global-activity"),"map roster offers both global edit menus");
+await global.ActivateAsync("global-condition");
+Check(global.Frame.Entries.First(e=>e.Key=="global-condition:1").Value=="1 eligible","global revival only counts knocked-out map NPCs");
+Check(global.Frame.Entries.First(e=>e.Key=="global-condition:2").Value=="2 eligible","global knockout excludes protected and incapacitated NPCs");
+await Reject(()=>global.ActivateAsync("global-condition:99"),"invalid global condition rejected");
+await Reject(()=>global.ActivateAsync("global-confirm:123"),"global action requires a valid confirmation");
+await global.ActivateAsync("global-condition:2");
+Check(global.Frame.Entries[0].Key=="global-cancel"&&globalCalls.Count==0,"global confirmation defaults to cancel without mutating NPCs");
+string staleConfirm=global.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;
+await global.ActivateAsync("global-cancel");
+Check(globalCalls.Count==0&&global.Frame.Title.Contains("CONDITION"),"cancel returns to global condition menu without changes");
+await global.ActivateAsync("global-condition:2");
+await Reject(()=>global.ActivateAsync(staleConfirm),"old confirmation cannot approve a newer global action");
+string confirm=global.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;
+globalSnapshots.RemoveAll(n=>n.Id==102);globalSnapshots.Add(Guard(106,false));
+string summary=await global.ActivateAsync(confirm);
+Check(globalCalls.Count==1&&globalCalls[0]==("condition",101,NpcConditionEdit.KnockedOut,null),"confirmed batch only edits surviving captured map IDs");
+Check(summary.Contains("1 requested, 1 skipped, 0 failed"),"batch summary reports disappeared NPCs as skipped");
+Check(!global.Busy&&global.Frame.Title.Contains("CONDITION"),"batch completion clears busy state and returns to global submenu");
+await global.ActivateAsync("global-condition:1");confirm=global.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;
+await global.ActivateAsync(confirm);
+Check(globalCalls[^1]==("condition",104,NpcConditionEdit.Alive,null),"global revival dispatches only to knocked-out map NPC");
+Check(global.Back()&&global.Frame.Title=="MAP NPCs","Back from global submenu returns to map roster");
+await global.ActivateAsync("global-activity");
+await global.ActivateAsync("global-activity:3");confirm=global.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;
+failGlobal=true;summary=await global.ActivateAsync(confirm);failGlobal=false;
+Check(globalCalls[^1]==("activity",106,null,NpcActivityEdit.Running)&&summary.Contains("1 requested, 0 skipped, 1 failed"),"global activity forwards running and continues after an individual refusal");
+
+var batchStarted=new TaskCompletionSource<bool>();var batchRelease=new TaskCompletionSource<string>();var batchIds=new List<uint>();
+var busySnapshots=new List<NpcSnapshot>{Guard(201,false),Guard(202,false),Guard(203) with {ProtectedGlobal=true}};
+using var bulkBusy=new NpcOverlayMenu(()=>Process.GetCurrentProcess(),_=>Task.FromResult<NpcSnapshot[]?>(busySnapshots.ToArray()),(_,act,id,hp,c,a)=>{batchIds.Add(id);if(id==201){batchStarted.TrySetResult(true);return batchRelease.Task;}return Task.FromResult("Requested");});
+await bulkBusy.RefreshAsync(true);bulkBusy.OpenMapRoster();await bulkBusy.ActivateAsync("global-activity");await bulkBusy.ActivateAsync("global-activity:2");
+confirm=bulkBusy.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;
+var bulkTask=bulkBusy.ActivateAsync(confirm);await batchStarted.Task;
+Check(bulkBusy.Busy&&bulkBusy.Back()&&bulkBusy.Frame.Title.Contains("ACTIVITY")&&bulkBusy.Back()&&bulkBusy.Frame.Title=="MAP NPCs","batch keeps Back navigation available");
+await bulkBusy.ActivateAsync("global-condition");
+Check(!bulkBusy.Frame.Entries.First(e=>e.Key=="global-condition:2").Available,"new batch mutations remain disabled while an action is pending");
+await bulkBusy.ActivateAsync("global-condition:2");
+busySnapshots[1]=busySnapshots[1] with {Health=0,PawnState="s_Dead",AiState="s_Dead"};
+batchRelease.SetResult("Requested");summary=await bulkTask;
+Check(batchIds.SequenceEqual(new uint[]{201})&&summary.Contains("1 requested, 1 skipped, 0 failed"),"state is revalidated between batch requests and dead NPCs are skipped");
+Check(bulkBusy.Frame.Title.Contains("CONDITION")&&!bulkBusy.Busy,"batch completion preserves a newly browsed page");
+
+var partialCalls=new List<uint>();bool loseSnapshot=false;
+using var partialBatch=new NpcOverlayMenu(()=>Process.GetCurrentProcess(),_=>loseSnapshot?throw new InvalidOperationException("Game disconnected"):Task.FromResult<NpcSnapshot[]?>(new[]{Guard(301,false),Guard(302,false)}),(_,act,id,hp,c,a)=>{partialCalls.Add(id);loseSnapshot=true;return Task.FromResult("Requested");});
+await partialBatch.RefreshAsync(true);partialBatch.OpenMapRoster();await partialBatch.ActivateAsync("global-condition");await partialBatch.ActivateAsync("global-condition:3");
+confirm=partialBatch.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;summary=await partialBatch.ActivateAsync(confirm);
+Check(partialCalls.SequenceEqual(new uint[]{301})&&summary.Contains("1 requested")&&summary.Contains("Stopped:")&&!partialBatch.Busy,"lost snapshot aborts the batch with a partial result and clears busy state");
+
+var included=new List<NpcSnapshot>{Guard(401,false),Guard(402),Guard(403,false) with {ProtectedGlobal=true}};var includedIds=new List<uint>();
+using var allOrigins=new NpcOverlayMenu(()=>Process.GetCurrentProcess(),_=>Task.FromResult<NpcSnapshot[]?>(included.ToArray()),(_,act,id,hp,c,a)=>{includedIds.Add(id);return Task.FromResult("Requested");});
+await allOrigins.RefreshAsync(true);allOrigins.OpenMapRoster();await allOrigins.ActivateAsync("global-condition");await allOrigins.ActivateAsync("global-condition:2");
+confirm=allOrigins.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;await allOrigins.ActivateAsync(confirm);
+Check(includedIds.SequenceEqual(new uint[]{401,402}),"global conditions include map and spawned NPCs while excluding protected NPCs");
+allOrigins.OpenSpawns();await allOrigins.ActivateAsync("roster");await allOrigins.ActivateAsync(Key(402));await allOrigins.ActivateAsync("global-exclude");
+await allOrigins.ActivateAsync("global-activity");await allOrigins.ActivateAsync("global-activity:2");confirm=allOrigins.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;
+includedIds.Clear();await allOrigins.ActivateAsync(confirm);
+Check(includedIds.SequenceEqual(new uint[]{401}),"manual exclusion applies to global activity for spawned NPCs");
+await allOrigins.ActivateAsync(Key(402));await allOrigins.ActivateAsync("global-exclude");await allOrigins.ActivateAsync("global-activity");await allOrigins.ActivateAsync("global-activity:3");confirm=allOrigins.Frame.Entries.First(e=>e.Key.StartsWith("global-confirm:")).Key;
+includedIds.Clear();included[0]=included[0] with {ProtectedGlobal=true};await allOrigins.ActivateAsync(confirm);
+Check(includedIds.SequenceEqual(new uint[]{402}),"global activity includes spawned NPCs and rechecks protection before dispatch");
+
+var recoverySnapshots=new[]{Guard(501,false) with {Controller=false,AiState="None"},Guard(502,false) with {AiState="s_Groggy"}};
+using var recovery=new NpcOverlayMenu(()=>Process.GetCurrentProcess(),_=>Task.FromResult<NpcSnapshot[]?>(recoverySnapshots),(_,act,id,hp,c,a)=>Task.FromResult("Requested"));
+await recovery.RefreshAsync(true);recovery.OpenMapRoster();await recovery.ActivateAsync("global-condition");
+Check(!recovery.Frame.Entries.First(e=>e.Key=="global-condition:2").Available,"missing controllers and unfinished revival are excluded temporarily");
+recoverySnapshots[0]=recoverySnapshots[0] with {Controller=true,AiState="s_Alert"};recoverySnapshots[1]=recoverySnapshots[1] with {AiState="s_Investigate"};
+await recovery.RefreshAsync(true);
+Check(recovery.Frame.Entries.First(e=>e.Key=="global-condition:2").Value=="2 eligible","refreshed controllers and completed revival restore global knockout counts without new IDs");
 
 namespace SCTrainer {
  internal sealed record GameMenuEntry(string Label,bool On,bool Available,string Key,string? Value=null,bool Toggle=true,bool Navigation=false,GameMenuInput? Input=null);

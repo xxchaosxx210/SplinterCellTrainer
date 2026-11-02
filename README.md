@@ -6,7 +6,7 @@ Windows trainer for the original Tom Clancy's Splinter Cell on Steam, built with
 
 
 
-**Trainer:** v0.23.1 prototype
+**Trainer:** v0.24.0 prototype
 
 **Supported Steam build:** 252083 (App ID 13560)
 
@@ -577,3 +577,12 @@ F6 → **NPC Manager** now groups Spawn guard, Browse NPCs, Global controls and 
 ### ESP and proximity browsing (v0.23.1)
 
 Enemy ESP is now the first toggle under F6 → NPC Manager, using the existing ESP implementation and shared state. It has been removed from the main menu. Browse NPCs sorts each All / Map / Spawned filter by current distance to Sam (nearest first), shows distances in metres and breaks ties by stable NPC ID. Live snapshots update the order; selections and edits remain bound to actor IDs. Global batch ordering is unchanged.
+
+
+## Sam Equipment (v0.24.0)
+
+F6 → **Sam Equipment** offers Weapons, Launcher ammunition, Gadgets and tools, and Medical and flares. Seventeen allowlisted inventory classes are supported: SC Pistol, SC-20K, Sticky Shocker, Ring Airfoil Round, Sticky Camera, Diversion Camera, Smoke / Gas Grenade, Wall Mine, Frag Grenade, Lockpick, Disposable Pick, Optic Cable, Camera Jammer, Laser Microphone, Medkit, Flare and Chemical Flare.
+
+Each item displays current ownership and quantity. Consumables offer Give 1, Give 5 and Set quantity (1–999 input, capped at the game's own MaxQuantity). Nonstacking weapons/tools offer Give item. Equip / select uses the game's normal inventory selection and requires an owned item. Launcher selection also requires the SC-20K. Sam must be in normal gameplay outside interactions. Grants of items missing from inventory load their allowlisted class, spawn an engine-owned actor and call the normal inventory Add routine; existing items are updated without spawning duplicates. No raw inventory arrays are resized or overwritten. Unlimited gadgets may refill a quantity you lower.
+
+Live inventory reading was verified against the supported running game. The user chose to test grants and selection themselves; those gameplay paths remain unverified.

@@ -26,7 +26,7 @@ internal static class DirectLevelLoader
         {
             ValidateGame(game);
             var version = await RunHelperAsync("--version");
-            if (version != "SCTravelHost:0.23.1:protocol22")
+            if (version != "SCTravelHost:0.24.0:protocol23")
                 throw new InvalidOperationException("Loader version mismatch. Close the trainer and use Launch Trainer.cmd.");
             if (map == "--probe") return await RunHelperAsync(game.Id.ToString(), map);
             var state = await RunHelperAsync(game.Id.ToString(), "--state");
@@ -60,11 +60,31 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if (await RunHelperAsync("--version") != "SCTravelHost:0.23.1:protocol22")
+            if (await RunHelperAsync("--version") != "SCTravelHost:0.24.0:protocol23")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             return await RunHelperAsync(game.Id.ToString(), enabled ? "--health-on" : "--health-off");
         }
         finally { Requests.Release(); }
+    }
+
+    internal static async Task<EquipmentStock[]?> ReadEquipmentAsync(Process game){
+        if(!await Requests.WaitAsync(0))return null;
+        try{
+            ValidateGame(game);
+            if(await RunHelperAsync("--version")!="SCTravelHost:0.24.0:protocol23")throw new InvalidOperationException("Loader version mismatch. Use Launch Trainer.cmd.");
+            return EquipmentStock.Parse(await RunHelperAsync(game.Id.ToString(),"--equipment-list"));
+        }
+        finally{Requests.Release();}
+    }
+    internal static async Task<string> EquipmentActionAsync(Process game,int id,int operation,int quantity){
+        if(id<1||id>17||operation<0||operation>2||(operation==2?quantity!=0:quantity<1||quantity>999))throw new ArgumentException("Invalid equipment request.");
+        if(!await Requests.WaitAsync(0))throw new InvalidOperationException("Wait for the current trainer request.");
+        try{
+            ValidateGame(game);
+            if(await RunHelperAsync("--version")!="SCTravelHost:0.24.0:protocol23")throw new InvalidOperationException("Loader version mismatch. Use Launch Trainer.cmd.");
+            await GameWindowFocus.PrepareAsync(game.MainWindowHandle);
+            return await RunHelperAsync(game.Id.ToString(),$"--equipment:{id}:{operation}:{quantity}");
+        }finally{Requests.Release();}
     }
 
     internal static Task<string> SetCheatsAsync(Process game, CheatSettings settings) => CheatCommandAsync(game,settings.Command);
@@ -78,7 +98,7 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if(await RunHelperAsync("--version")!="SCTravelHost:0.23.1:protocol22")
+            if(await RunHelperAsync("--version")!="SCTravelHost:0.24.0:protocol23")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             return await RunHelperAsync(game.Id.ToString(),command);
         }
@@ -109,7 +129,7 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if(await RunHelperAsync("--version")!="SCTravelHost:0.23.1:protocol22")
+            if(await RunHelperAsync("--version")!="SCTravelHost:0.24.0:protocol23")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             await GameWindowFocus.PrepareAsync(game.MainWindowHandle);
             var reply=await RunHelperAsync(game.Id.ToString(),command);

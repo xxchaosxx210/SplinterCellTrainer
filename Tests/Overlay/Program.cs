@@ -263,10 +263,52 @@ Check(distances.Frame.Entries.First(e=>e.Key.StartsWith("npc:")).Key==Key(701),"
 await distances.ActivateAsync("filter-menu");await distances.ActivateAsync("filter:1");Check(distances.Frame.Entries.Where(e=>e.Key.StartsWith("npc:")).Select(e=>e.Key).SequenceEqual(new[]{Key(701),Key(703)}),"Map filter retains nearest-first ordering");
 await distances.ActivateAsync("filter-menu");await distances.ActivateAsync("filter:2");Check(distances.Frame.Entries.Single(e=>e.Key.StartsWith("npc:")).Key==Key(702),"Spawned filter retains its own NPC subset");
 
+var stockText="EQUIPMENT:1\n"+string.Join("\n",Enumerable.Range(1,17).Select(id=>$"{id}|0|0|0"));
+Check(EquipmentStock.Parse(stockText).Length==17,"equipment protocol covers all seventeen allowlisted items");
+void BadStock(string input,string label){try{EquipmentStock.Parse(input);}catch(FormatException){Console.WriteLine("PASS "+label);return;}throw new Exception(label);}
+BadStock(stockText.Replace("17|0|0|0","16|0|0|0"),"duplicate equipment identities rejected");
+BadStock(stockText.Replace("17|0|0|0","18|0|0|0"),"unknown equipment identities rejected");
+BadStock(stockText.Replace("17|0|0|0","17|2|0|0"),"invalid ownership marker rejected");
+BadStock(stockText.Replace("17|0|0|0","17|1|-1|5"),"negative quantities rejected");
+InvalidInput(new("Quantity","0",MenuInputKind.Quantity),"zero equipment quantity rejected");
+InvalidInput(new("Quantity","1000",MenuInputKind.Quantity),"oversized equipment quantity rejected");
+InvalidInput(new("Quantity","2.5",MenuInputKind.Quantity),"fractional equipment quantity rejected");
+Check(new OverlayTextEditor("",new("Quantity","999",MenuInputKind.Quantity)).Value()=="999","maximum input quantity accepted for native clamping");
+var equipmentStock=EquipmentStock.Parse(stockText);var equipmentCalls=new List<(int Id,int Op,int Count)>();
+using var equipment=new EquipmentMenu(()=>Process.GetCurrentProcess(),_=>Task.FromResult<EquipmentStock[]?>(equipmentStock),(_,id,op,quantity)=>{
+ equipmentCalls.Add((id,op,quantity));equipmentStock[id-1]=new(id,true,Math.Min(10,op==0?equipmentStock[id-1].Quantity+quantity:quantity),10);return Task.FromResult("Updated");});
+await equipment.RefreshAsync(true);equipment.Open();
+Check(equipment.Frame.Entries.Count(e=>e.Key.StartsWith("equipment-category:"))==4,"equipment root groups the four requested categories");
+await equipment.ActivateAsync("equipment-category:1");Check(equipment.Frame.Entries.Count(e=>e.Key.StartsWith("equipment-item:"))==5,"launcher category contains all five compatible ammunition types");
+await equipment.ActivateAsync("equipment-item:3");
+Check(!equipment.Frame.Entries.First(e=>e.Key.StartsWith("equipment-select:")).Available,"unowned equipment cannot be selected");
+await Reject(()=>equipment.ActivateAsync($"equipment-select:{Environment.ProcessId}:3:0"),"direct select of an unowned item rejected");
+await equipment.ActivateAsync($"equipment-add:{Environment.ProcessId}:3:5");
+Check(equipmentCalls[^1]==(3,0,5)&&equipment.Frame.Entries.First(e=>e.Key.StartsWith("equipment-select:")).Available,"Give 5 dispatches the exact item and refreshes ownership");
+await equipment.ActivateAsync($"equipment-set:{Environment.ProcessId}:3:7");Check(equipmentCalls[^1]==(3,1,7),"Set quantity sends an absolute quantity rather than an increment");
+await Reject(()=>equipment.ActivateAsync($"equipment-set:{Environment.ProcessId}:3:1000"),"invalid quantity cannot reach the native helper");
+await Reject(()=>equipment.ActivateAsync($"equipment-add:{Environment.ProcessId}:99:1"),"noncatalog item cannot reach the helper");
+await Reject(()=>equipment.ActivateAsync($"equipment-add:1:3:1"),"stale game session input cannot give an item to a new session");
+Check(!equipment.Busy,"failed equipment action clears its busy state");
+equipment.Back();equipment.Back();await equipment.ActivateAsync("equipment-category:0");await equipment.ActivateAsync("equipment-item:1");
+Check(!equipment.Frame.Entries.Any(e=>e.Key.StartsWith("equipment-set:"))&&equipment.Frame.Entries.Count(e=>e.Key.StartsWith("equipment-add:"))==1,"weapons offer one grant rather than stack quantity controls");
+Check(equipment.Back()&&equipment.Back()&&!equipment.Back(),"equipment Back navigation returns through category to root then main");
+var equipmentStarted=new TaskCompletionSource<bool>();var equipmentDone=new TaskCompletionSource<string>();
+using var pendingEquipment=new EquipmentMenu(()=>Process.GetCurrentProcess(),_=>Task.FromResult<EquipmentStock[]?>(equipmentStock),(_,id,op,q)=>{equipmentStarted.TrySetResult(true);return equipmentDone.Task;});
+await pendingEquipment.RefreshAsync(true);await pendingEquipment.ActivateAsync("equipment-category:1");await pendingEquipment.ActivateAsync("equipment-item:3");
+var equipTask=pendingEquipment.ActivateAsync($"equipment-add:{Environment.ProcessId}:3:1");await equipmentStarted.Task;
+Check(pendingEquipment.Busy&&pendingEquipment.Back()&&pendingEquipment.Back(),"equipment navigation stays available during a pending mutation");
+await pendingEquipment.ActivateAsync("equipment-category:2");await pendingEquipment.ActivateAsync("equipment-item:8");
+Check(!pendingEquipment.Frame.Entries.First(e=>e.Key.StartsWith("equipment-add:")).Available,"new equipment mutations stay disabled while a request is pending");
+equipmentDone.SetResult("Updated");await equipTask;
+Check(!pendingEquipment.Busy&&pendingEquipment.Frame.Title=="WALL MINE","equipment completion preserves the newly browsed item page");
+
 namespace SCTrainer {
  internal sealed record GameMenuEntry(string Label,bool On,bool Available,string Key,string? Value=null,bool Toggle=true,bool Navigation=false,GameMenuInput? Input=null);
  internal sealed record GameMenuFrame(string Key,string Title,GameMenuEntry[] Entries);
  internal static class DirectLevelLoader {
+  public static Task<EquipmentStock[]?> ReadEquipmentAsync(Process game)=>throw new Exception("Unexpected real equipment read");
+  public static Task<string> EquipmentActionAsync(Process game,int id,int operation,int quantity)=>throw new Exception("Unexpected real equipment mutation");
   public static void ValidateGame(Process game)=>throw new Exception("Unexpected real game validation in test");
   public static Task<NpcSnapshot[]?> ReadNpcsAsync(Process game)=>throw new Exception("Unexpected real read in test");
   public static Task<string> NpcActionAsync(Process game,string action,uint id=0,int hp=100,NpcConditionEdit? condition=null,NpcActivityEdit? activity=null,NpcPosition? position=null,bool waitForCompletion=true)=>throw new Exception("Unexpected real action in test");

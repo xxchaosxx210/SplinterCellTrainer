@@ -6,7 +6,7 @@ Windows trainer for the original Tom Clancy's Splinter Cell on Steam, built with
 
 
 
-**Trainer:** v0.27.0 prototype
+**Trainer:** v0.28.0 prototype
 
 **Supported Steam build:** 252083 (App ID 13560)
 
@@ -15,6 +15,8 @@ Windows trainer for the original Tom Clancy's Splinter Cell on Steam, built with
 The in-game **Stealth** submenu groups Quiet lights out, Invisibility, and Reduced detection.
 
 The in-game **Security** submenu groups the camera disable, turret deactivate, and turret IFF toggles.
+
+The **Missions** menu contains **Load level** (main menu only) and **Complete next objective**. Scripted completion dispatches the map's normal `EGroupAI.SendJumpEvent`, including its flags, dialogue and follow-up events, rather than setting OPSAT checkmarks. Current explicit routes cover Tbilisi part 2 (Black box, Dead drop, Streets), Tbilisi part 3 (Precinct, Blaustein, Access, Extract), and Kalinatek rooftop (Clear the roof / mission success). Unmapped objectives are refused without changing their status. Let each script finish before requesting another; final objectives can end the mission. Kalinatek rooftop mission success has been confirmed in a live test. The Tbilisi routes are implemented from reference scripts but have not yet been confirmed in live tests. This is an experimental feature with partial mission coverage; work on additional routes is deferred.
 
 ## Features
 
@@ -630,7 +632,7 @@ Creation now matches EPawn's normal inventory initialization: spawn with the con
 Captured fault evidence showed ULevel::SpawnActor was copying the player controller as an actor template. Its first actor pointer is Template and its actor pointer after the flags is Owner. Inventory creation now passes a null template and the controller in the owner argument. A shared wrapper and native regression test enforce this ABI ordering. The approved live Wall Mine grant increased Sam's actual inventory count from 1 to 2; no additional grants were issued. Diagnostic exceptions record stage/module/RVA in EquipmentFault.log beside the helper build.
 
 
-## Reversible lights and security controls (v0.27.0)
+## Reversible lights and security controls (v0.28.0)
 
 The main F6 menu now includes **Disable security cameras**, **Deactivate turrets**, and **Disable turret IFF** as independent ON/OFF toggles. Turning OFF restores the captured state or detection mode of surviving devices changed by the trainer. Devices already disabled before enabling the toggle are left alone; destroyed/jammed devices are not repaired. IFF OFF in the game means turrets can target guards and Sam; disabling the turret takes precedence until it is reactivated. Re-enabling IFF makes an alert turret rescan with its original mode. These options share the existing cheat heartbeat and restore-on-exit lifecycle.
 

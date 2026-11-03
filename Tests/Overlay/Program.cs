@@ -368,6 +368,23 @@ using var clampedGrant=new EquipmentMenu(()=>Process.GetCurrentProcess(),_=>Task
 await clampedGrant.RefreshAsync(true);await clampedGrant.ActivateAsync("equipment-category:2");await clampedGrant.ActivateAsync("equipment-item:8");
 string clampReply=await clampedGrant.ActivateAsync($"equipment-add:{Environment.ProcessId}:8:5");Check(clampReply.Contains("3 / 3 confirmed"),"Give 5 verifies the actual capped three-mine inventory count");
 
+var objectiveCalls=0;var objectiveReady=true;var objectiveDone=new TaskCompletionSource<string>();
+var missionLevels=new LevelOverlayMenu(()=>new[]{new LevelMenuChoice("1_1_0Tbilisi","Police Station  /  Start")},_=>Task.FromResult("Loaded"));
+var missions=new MissionsOverlayMenu(missionLevels,()=>{++objectiveCalls;return objectiveDone.Task;},()=>objectiveReady);
+Check(missions.Frame.Title=="MISSIONS"&&missions.Frame.Entries.Any(e=>e.Key=="levels"),"Missions contains Load level and a one-objective action");
+await missions.ActivateAsync("levels");Check(missions.Frame.Key.StartsWith("levels:"),"Load level opens its existing mission groups");
+await missions.ActivateAsync("mission:Police Station");
+Check(missions.Back()&&missions.Frame.Key=="levels::","Back from level sections returns to the level group list");
+Check(missions.Back()&&missions.Frame.Title=="MISSIONS","Back from Load level returns to Missions");
+Check(!missions.Back(),"Back from Missions returns control to main menu");
+objectiveReady=false;await missions.ActivateAsync("objective-next");Check(objectiveCalls==0,"unavailable mission action cannot complete an objective");objectiveReady=true;
+var objectivePending=missions.ActivateAsync("objective-next");await missions.ActivateAsync("objective-next");
+Check(objectiveCalls==1&&missions.Busy&&!missions.Frame.Entries.First(e=>e.Key=="objective-next").Available,"pending completion blocks duplicate objective requests");
+await missions.ActivateAsync("levels");objectiveDone.SetResult("Completed objective: TEST");
+Check(await objectivePending=="Completed objective: TEST"&&!missions.Busy&&missions.Frame.Key.StartsWith("levels:"),"completion preserves browsing and clears busy state");
+var failedMission=new MissionsOverlayMenu(missionLevels,()=>throw new InvalidOperationException("Unavailable"),()=>true);
+await Reject(()=>failedMission.ActivateAsync("objective-next"),"completion failure is surfaced");Check(!failedMission.Busy,"failed completion clears busy state for retry");
+
 namespace SCTrainer {
  internal sealed record GameMenuEntry(string Label,bool On,bool Available,string Key,string? Value=null,bool Toggle=true,bool Navigation=false,GameMenuInput? Input=null);
  internal sealed record GameMenuFrame(string Key,string Title,GameMenuEntry[] Entries);

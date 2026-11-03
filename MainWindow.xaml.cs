@@ -76,14 +76,14 @@ public partial class MainWindow : Window
     private bool _showEquipment;
     private bool _showOverlayNpcs,_showOverlayLevels,_levelLoading;
     private string? _utilityPage;
-    private LevelOverlayMenu? _overlayLevels;
+    private MissionsOverlayMenu? _overlayLevels;
     private LevelChoice[] _levels=Array.Empty<LevelChoice>();
     private static readonly CheatOptions[] MenuOptions={CheatOptions.UnlimitedAmmo,CheatOptions.NoReload,CheatOptions.UnlimitedGadgets,CheatOptions.ReducedDetection,CheatOptions.MovementSpeed,CheatOptions.Invisibility,CheatOptions.Noclip,CheatOptions.BypassLocks,CheatOptions.QuietLights,CheatOptions.CamerasOff,CheatOptions.TurretsOff,CheatOptions.IffOff};
     private void StartGameMenu()
     {
         if(_gameMenu is not null)return;
         try {
-            _overlayLevels=new LevelOverlayMenu(()=>_levels.Select(l=>new LevelMenuChoice(l.Map,l.Label)).ToArray(),LoadOverlayLevelAsync);
+            _overlayLevels=new MissionsOverlayMenu(new LevelOverlayMenu(()=>_levels.Select(l=>new LevelMenuChoice(l.Map,l.Label)).ToArray(),LoadOverlayLevelAsync),CompleteNextObjectiveAsync,()=>!IsBusy);
             _gameMenu=new GameMenuOverlay(ReadGameMenu,ToggleGameMenuAsync,()=>_levelLoading?Task.CompletedTask:_showEquipment?_equipment.RefreshAsync():_showOverlayNpcs?_overlayNpcs.RefreshAsync():Task.CompletedTask);
             _gameMenu.Show();
             MenuStatus.Text="In-game menu: F6 to open / close; arrows to select; Enter to toggle.";
@@ -114,7 +114,7 @@ public partial class MainWindow : Window
         items.Add(new("Trainer tools / About / Exit",false,true,"tools-menu",null,false,true));
         items.Insert(0,new("Sam Equipment",false,true,"equipment",null,false,true));
         items.Insert(0,new("NPC Manager",false,true,"npcs",null,false,true));
-        items.Insert(0,new("Load level",false,true,"levels",null,false,true));
+        items.Insert(0,new("Missions",false,true,"missions",null,false,true));
         return new("main","TRAINER MENU",items.ToArray());
     }
     private async Task<string> ToggleGameMenuAsync(string key)
@@ -130,8 +130,8 @@ public partial class MainWindow : Window
         }
         if(key=="back"&&_utilityPage is not null){_utilityPage=_utilityPage is "about" or "exit"?"tools":null;return "";}
         if(_utilityPage is not null&&!((_utilityPage is "security" or "stealth")&&key.StartsWith("cheat:")))return await ActivateUtilityAsync(key);
-        if(key=="levels"){
-            _showOverlayNpcs=false;_showOverlayLevels=true;_overlayLevels!.Open();return "Load maps from the game's main menu.";
+        if(key=="missions"){
+            _showOverlayNpcs=false;_showOverlayLevels=true;_overlayLevels!.Open();return "Run the next objective completion script, or load a level.";
         }
         if(key=="back"&&_showOverlayLevels){if(!_overlayLevels!.Back())_showOverlayLevels=false;return "";}
         if(_showOverlayLevels)return await _overlayLevels!.ActivateAsync(key);
@@ -151,6 +151,19 @@ public partial class MainWindow : Window
         var settings=ReadCheatSettings();
         await ApplyCheatSettingsAsync(settings with {Options=settings.Options^MenuOptions[selected-2]});
         return CheatStatus.Text;
+    }
+
+    private async Task<string> CompleteNextObjectiveAsync()
+    {
+        if(IsBusy)return "Please wait for the current update.";
+        _worldActionChanging=true;
+        var games=Process.GetProcessesByName("SplinterCell");
+        try {
+            if(games.Length!=1)throw new InvalidOperationException("Start one game and load a mission first.");
+            return await DirectLevelLoader.CompleteNextObjectiveAsync(games[0]);
+        }
+        catch(Exception ex) when(ex is InvalidOperationException or System.ComponentModel.Win32Exception or System.IO.IOException){return ex.Message;}
+        finally{foreach(var game in games)game.Dispose();_worldActionChanging=false;}
     }
 
     private async Task<string> ApplyWorldActionAsync()

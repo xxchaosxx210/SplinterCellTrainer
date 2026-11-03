@@ -6,11 +6,15 @@ Windows trainer for the original Tom Clancy's Splinter Cell on Steam, built with
 
 
 
-**Trainer:** v0.26.4 prototype
+**Trainer:** v0.27.0 prototype
 
 **Supported Steam build:** 252083 (App ID 13560)
 
 
+
+The in-game **Stealth** submenu groups Quiet lights out, Invisibility, and Reduced detection.
+
+The in-game **Security** submenu groups the camera disable, turret deactivate, and turret IFF toggles.
 
 ## Features
 
@@ -624,3 +628,12 @@ Creation now matches EPawn's normal inventory initialization: spawn with the con
 ### Native inventory spawn fix (v0.26.4)
 
 Captured fault evidence showed ULevel::SpawnActor was copying the player controller as an actor template. Its first actor pointer is Template and its actor pointer after the flags is Owner. Inventory creation now passes a null template and the controller in the owner argument. A shared wrapper and native regression test enforce this ABI ordering. The approved live Wall Mine grant increased Sam's actual inventory count from 1 to 2; no additional grants were issued. Diagnostic exceptions record stage/module/RVA in EquipmentFault.log beside the helper build.
+
+
+## Reversible lights and security controls (v0.27.0)
+
+The main F6 menu now includes **Disable security cameras**, **Deactivate turrets**, and **Disable turret IFF** as independent ON/OFF toggles. Turning OFF restores the captured state or detection mode of surviving devices changed by the trainer. Devices already disabled before enabling the toggle are left alone; destroyed/jammed devices are not repaired. IFF OFF in the game means turrets can target guards and Sam; disabling the turret takes precedence until it is reactivated. Re-enabling IFF makes an alert turret rescan with its original mode. These options share the existing cheat heartbeat and restore-on-exit lifecycle.
+
+**Quiet lights out** now keeps an immutable snapshot and restores the exact captured type, brightness, glow, beam and initial-restore flags when switched OFF. It also updates the reflected ELight/EGameplayObject LastTimeChange timestamp, invalidates actor lighting caches and requests the player's lightmap cache refresh, matching the renderer updates used by the game's own light switch routines. Originally unlit and destroyed fixtures are not forcibly switched on.
+
+Live reflection checks verified sensor states, turret IFF mode enumeration and light timestamp fields against the supported running game. Gameplay toggle/restore verification is pending.

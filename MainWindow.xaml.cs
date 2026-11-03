@@ -78,7 +78,7 @@ public partial class MainWindow : Window
     private string? _utilityPage;
     private LevelOverlayMenu? _overlayLevels;
     private LevelChoice[] _levels=Array.Empty<LevelChoice>();
-    private static readonly CheatOptions[] MenuOptions={CheatOptions.UnlimitedAmmo,CheatOptions.NoReload,CheatOptions.UnlimitedGadgets,CheatOptions.ReducedDetection,CheatOptions.MovementSpeed,CheatOptions.Invisibility,CheatOptions.Noclip,CheatOptions.BypassLocks,CheatOptions.QuietLights};
+    private static readonly CheatOptions[] MenuOptions={CheatOptions.UnlimitedAmmo,CheatOptions.NoReload,CheatOptions.UnlimitedGadgets,CheatOptions.ReducedDetection,CheatOptions.MovementSpeed,CheatOptions.Invisibility,CheatOptions.Noclip,CheatOptions.BypassLocks,CheatOptions.QuietLights,CheatOptions.CamerasOff,CheatOptions.TurretsOff,CheatOptions.IffOff};
     private void StartGameMenu()
     {
         if(_gameMenu is not null)return;
@@ -102,13 +102,15 @@ public partial class MainWindow : Window
         var items=new List<GameMenuEntry> {
             new("Infinite health",InfiniteHealthToggle.IsChecked==true,ready,"cheat:1")
         };
-        string[] labels={"Unlimited ammunition","No reload","Unlimited gadgets","Reduced detection",$"Movement speed ({settings.SpeedPercent/100.0:0.##}x)","Invisibility","Noclip (walls / doors)","Bypass locks","Quiet lights out"};
+        string[] labels={"Unlimited ammunition","No reload","Unlimited gadgets","Reduced detection",$"Movement speed ({settings.SpeedPercent/100.0:0.##}x)","Invisibility","Noclip (walls / doors)","Bypass locks","Quiet lights out","Disable security cameras","Deactivate turrets","Disable turret IFF"};
         for(int i=0;i<MenuOptions.Length;++i){
+            if((MenuOptions[i]&(CheatOptions.CamerasOff|CheatOptions.TurretsOff|CheatOptions.IffOff|CheatOptions.QuietLights|CheatOptions.Invisibility|CheatOptions.ReducedDetection))!=0)continue;
             if(MenuOptions[i]==CheatOptions.MovementSpeed)items.Add(new("Movement speed",false,true,"speed-menu",settings.Options.HasFlag(CheatOptions.MovementSpeed)?$"{settings.SpeedPercent/100.0:0.##}x":"OFF",false,true));
             else items.Add(new(labels[i],settings.Options.HasFlag(MenuOptions[i]),ready,$"cheat:{i+2}"));
         }
+        items.Add(new("Stealth",false,true,"stealth-menu",null,false,true));
+        items.Add(new("Security",false,true,"security-menu",null,false,true));
         items.Add(new("Enemies fight each other (30s)",false,ready,"guards-fight",null,false));
-        items.Add(new("Disable all security cameras",false,ready,"cameras-disable",null,false));
         items.Add(new("Trainer tools / About / Exit",false,true,"tools-menu",null,false,true));
         items.Insert(0,new("Sam Equipment",false,true,"equipment",null,false,true));
         items.Insert(0,new("NPC Manager",false,true,"npcs",null,false,true));
@@ -123,11 +125,11 @@ public partial class MainWindow : Window
         }
         if(key=="back"&&_showEquipment){if(!_equipment.Back())_showEquipment=false;return "";}
         if(_showEquipment)return await _equipment.ActivateAsync(key);
-        if(key is "speed-menu" or "tools-menu"){
-            _showOverlayNpcs=false;_showOverlayLevels=false;_utilityPage=key=="speed-menu"?"speed":"tools";return "";
+        if(key is "speed-menu" or "tools-menu" or "security-menu" or "stealth-menu"){
+            _showOverlayNpcs=false;_showOverlayLevels=false;_utilityPage=key switch {"speed-menu"=>"speed","security-menu"=>"security","stealth-menu"=>"stealth",_=>"tools"};return "";
         }
         if(key=="back"&&_utilityPage is not null){_utilityPage=_utilityPage is "about" or "exit"?"tools":null;return "";}
-        if(_utilityPage is not null)return await ActivateUtilityAsync(key);
+        if(_utilityPage is not null&&!((_utilityPage is "security" or "stealth")&&key.StartsWith("cheat:")))return await ActivateUtilityAsync(key);
         if(key=="levels"){
             _showOverlayNpcs=false;_showOverlayLevels=true;_overlayLevels!.Open();return "Load maps from the game's main menu.";
         }
@@ -140,8 +142,7 @@ public partial class MainWindow : Window
         }
         if(key=="back"){if(!_overlayNpcs.Back())_showOverlayNpcs=false;return "";}
         if(_showOverlayNpcs){if(_levelLoading)return "Wait for level loading to finish.";return await _overlayNpcs.ActivateAsync(key);}
-        if(key=="cameras-disable")return await ApplyWorldActionAsync(false);
-        if(key=="guards-fight")return await ApplyWorldActionAsync(true);
+        if(key=="guards-fight")return await ApplyWorldActionAsync();
         if(!key.StartsWith("cheat:")||!int.TryParse(key.AsSpan(6),out int selected))return "Select an option.";
         if(_levelLoading||_healthChanging||_cheatsChanging||_cheatRefreshBusy||_worldActionChanging)return "Please wait for the current update.";
         if(selected==0){EnemyEspToggle.IsChecked=EnemyEspToggle.IsChecked!=true;return EspStatus.Text;}
@@ -152,14 +153,14 @@ public partial class MainWindow : Window
         return CheatStatus.Text;
     }
 
-    private async Task<string> ApplyWorldActionAsync(bool fighting)
+    private async Task<string> ApplyWorldActionAsync()
     {
         if(IsBusy)return "Please wait for the current update.";
         _worldActionChanging=true;
         var games=Process.GetProcessesByName("SplinterCell");
         try {
             if(games.Length!=1)throw new InvalidOperationException("Start one copy of Splinter Cell and load a mission.");
-            return MenuStatus.Text=fighting?await DirectLevelLoader.FightGuardsAsync(games[0]):await DirectLevelLoader.DisableCamerasAsync(games[0]);
+            return MenuStatus.Text=await DirectLevelLoader.FightGuardsAsync(games[0]);
         }
         catch(Exception ex) when(ex is InvalidOperationException or System.ComponentModel.Win32Exception or System.IO.IOException){return MenuStatus.Text=ex.Message;}
         finally{foreach(var game in games)game.Dispose();_worldActionChanging=false;}
@@ -170,7 +171,13 @@ public partial class MainWindow : Window
         bool ready=!_levelLoading&&!_overlayNpcs.Busy&&!_overlayNpcs.Refreshing&&!_healthChanging&&!_cheatsChanging&&!_cheatRefreshBusy&&!_worldActionChanging;
         var rows=new List<GameMenuEntry>();string title="TRAINER TOOLS";
         GameMenuEntry Row(string label,string key,bool enabled=true,bool navigation=false,string? value=null)=>new(label,false,enabled,key,value,false,navigation);
-        if(_utilityPage=="speed"){
+        if(_utilityPage is "security" or "stealth"){
+            bool stealth=_utilityPage=="stealth";
+            title=stealth?"STEALTH":"SECURITY";var settings=ReadCheatSettings();
+            string[] labels=stealth?new[]{"Quiet lights out","Invisibility","Reduced detection"}:new[]{"Disable security cameras","Deactivate turrets","Disable turret IFF"};
+            CheatOptions[] options=stealth?new[]{CheatOptions.QuietLights,CheatOptions.Invisibility,CheatOptions.ReducedDetection}:new[]{CheatOptions.CamerasOff,CheatOptions.TurretsOff,CheatOptions.IffOff};
+            for(int i=0;i<options.Length;++i)rows.Add(new(labels[i],settings.Options.HasFlag(options[i]),ready,$"cheat:{Array.IndexOf(MenuOptions,options[i])+2}"));
+        } else if(_utilityPage=="speed"){
             title="MOVEMENT SPEED";var settings=ReadCheatSettings();
             rows.Add(new("Enable movement speed",settings.Options.HasFlag(CheatOptions.MovementSpeed),ready,"speed-toggle"));
             foreach(int percent in new[]{50,100,150,200,300})rows.Add(Row($"{percent/100.0:0.##}x"+(percent==100?" (normal)":""),"speed:"+percent,ready,value:settings.SpeedPercent==percent?"Selected":""));
@@ -330,11 +337,12 @@ public partial class MainWindow : Window
         e.Cancel=true;RequestExit();
     }
     private CheatSession? _cheatSession;
+    private CheatOptions _securityOptions;
     private bool _cheatsChanging, _cheatRefreshBusy, _cheatControlsReady;
 
     private CheatSettings ReadCheatSettings()
     {
-        CheatOptions options=CheatOptions.None;
+        CheatOptions options=_securityOptions;
         if(UnlimitedAmmoToggle.IsChecked==true)options|=CheatOptions.UnlimitedAmmo;
         if(NoReloadToggle.IsChecked==true)options|=CheatOptions.NoReload;
         if(UnlimitedGadgetsToggle.IsChecked==true)options|=CheatOptions.UnlimitedGadgets;
@@ -358,6 +366,7 @@ public partial class MainWindow : Window
 
     private void ShowCheatSettings(CheatSettings settings)
     {
+        _securityOptions=settings.Options&(CheatOptions.CamerasOff|CheatOptions.TurretsOff|CheatOptions.IffOff);
         UnlimitedAmmoToggle.IsChecked=settings.Options.HasFlag(CheatOptions.UnlimitedAmmo);
         NoReloadToggle.IsChecked=settings.Options.HasFlag(CheatOptions.NoReload);
         UnlimitedGadgetsToggle.IsChecked=settings.Options.HasFlag(CheatOptions.UnlimitedGadgets);
@@ -403,7 +412,8 @@ public partial class MainWindow : Window
                 catch{games[0].Dispose();throw;}
                 _cheatSession?.Dispose();_cheatSession=updated;
                 CheatStatus.Text="Active: "+settings.Options+
-                    (settings.Options.HasFlag(CheatOptions.MovementSpeed)?$" • Speed {settings.SpeedPercent/100.0:0.##}x":"");
+                    (settings.Options.HasFlag(CheatOptions.MovementSpeed)?$" • Speed {settings.SpeedPercent/100.0:0.##}x":"")+
+                    (settings.Options.HasFlag(CheatOptions.IffOff)?" • Turrets can target guards and Sam.":"");
             }
             ShowCheatSettings(settings);
             return true;

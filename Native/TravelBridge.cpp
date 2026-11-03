@@ -5,15 +5,14 @@
 #include "EquipmentProtocol.h"
 
 struct Request { DWORD version; DWORD pid; HWND window; LONG result; wchar_t map[128]; };
-static constexpr DWORD Version = 29;
-static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v29";
-static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v29.%lu", pid); }
+static constexpr DWORD Version = 30;
+static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v30";
+static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v30.%lu", pid); }
 
 #ifdef BRIDGE_DLL
 #include "Cheats.h"
 #include "Freeze.h"
 #include "Spawn.h"
-#include "Cameras.h"
 #include "Fighting.h"
 #include "Equipment.h"
 #ifdef SC_TRAVEL_DIAGNOSTICS
@@ -100,7 +99,6 @@ static void Handle(Request* r) {
         if (TrainerCheats::SafeRequest(r, viewport, core, objects)) return;
         if (TrainerFreeze::Handle(r,core,objects)) return;
         if (TrainerSpawn::SafeRequest(r, viewport, core, engine, objects)) return;
-        if (TrainerCameras::Handle(r, viewport, core, objects)) return;
         if (TrainerFighting::Handle(r, viewport, core, objects)) return;
         if (TrainerEquipment::Handle(r, viewport, core, engine, objects)) return;
         if (!wcscmp(r->map, L"--health-on") || !wcscmp(r->map, L"--health-off")) {
@@ -191,7 +189,7 @@ static BOOL CALLBACK FindWindow(HWND window, LPARAM context) {
     return TRUE;
 }
 int wmain(int argc, wchar_t** argv) {
-    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.26.4:protocol29"); return 0; }
+    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.27.0:protocol30"); return 0; }
     if (argc != 3) { puts("Expected process ID and map."); return 2; }
     Search search = { wcstoul(argv[1], nullptr, 10), nullptr };
     EnumWindows(FindWindow, reinterpret_cast<LPARAM>(&search));
@@ -254,6 +252,7 @@ int wmain(int argc, wchar_t** argv) {
         UnmapViewOfFile(equipmentData);CloseHandle(equipmentMapping);if(valid)return 0;
     }
     switch (result) {
+    case 67: puts("Security toggles are unavailable for the loaded sensor scripts. No security changes applied.");return 39;
     case 66: puts("The game refused to add that item to Sam inventory. No grant confirmed.");return 38;
     case 65: wprintf(L"%s\n",requestMap);return 37;
     case 64: puts("The item was created but was not attached to Sam correctly. Inventory grant not confirmed.");return 36;

@@ -26,7 +26,7 @@ internal static class DirectLevelLoader
         {
             ValidateGame(game);
             var version = await RunHelperAsync("--version");
-            if (version != "SCTravelHost:0.26.4:protocol29")
+            if (version != "SCTravelHost:0.27.0:protocol30")
                 throw new InvalidOperationException("Loader version mismatch. Close the trainer and use Launch Trainer.cmd.");
             if (map == "--probe") return await RunHelperAsync(game.Id.ToString(), map);
             var state = await RunHelperAsync(game.Id.ToString(), "--state");
@@ -60,7 +60,7 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if (await RunHelperAsync("--version") != "SCTravelHost:0.26.4:protocol29")
+            if (await RunHelperAsync("--version") != "SCTravelHost:0.27.0:protocol30")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             return await RunHelperAsync(game.Id.ToString(), enabled ? "--health-on" : "--health-off");
         }
@@ -71,7 +71,7 @@ internal static class DirectLevelLoader
         if(!await Requests.WaitAsync(0))return null;
         try{
             ValidateGame(game);
-            if(await RunHelperAsync("--version")!="SCTravelHost:0.26.4:protocol29")throw new InvalidOperationException("Loader version mismatch. Use Launch Trainer.cmd.");
+            if(await RunHelperAsync("--version")!="SCTravelHost:0.27.0:protocol30")throw new InvalidOperationException("Loader version mismatch. Use Launch Trainer.cmd.");
             return EquipmentStock.Parse(await RunHelperAsync(game.Id.ToString(),"--equipment-list"));
         }
         finally{Requests.Release();}
@@ -81,7 +81,7 @@ internal static class DirectLevelLoader
         if(!await Requests.WaitAsync(0))throw new InvalidOperationException("Wait for the current trainer request.");
         try{
             ValidateGame(game);
-            if(await RunHelperAsync("--version")!="SCTravelHost:0.26.4:protocol29")throw new InvalidOperationException("Loader version mismatch. Use Launch Trainer.cmd.");
+            if(await RunHelperAsync("--version")!="SCTravelHost:0.27.0:protocol30")throw new InvalidOperationException("Loader version mismatch. Use Launch Trainer.cmd.");
             await GameWindowFocus.PrepareAsync(game.MainWindowHandle);
             return await RunHelperAsync(game.Id.ToString(),$"--equipment:{id}:{operation}:{quantity}");
         }finally{Requests.Release();}
@@ -89,7 +89,6 @@ internal static class DirectLevelLoader
 
     internal static Task<string> SetCheatsAsync(Process game, CheatSettings settings) => CheatCommandAsync(game,settings.Command);
     internal static Task<string> FightGuardsAsync(Process game) => CheatCommandAsync(game,"--guards-fight");
-    internal static Task<string> DisableCamerasAsync(Process game) => CheatCommandAsync(game,"--cameras-disable");
     internal static Task<string> FreezeControlAsync(Process game,bool restore=false) => CheatCommandAsync(game,restore?"--freeze-off":"--freeze-ping");
     internal static Task<string> PingCheatsAsync(Process game) => CheatCommandAsync(game,"--cheats-ping");
 
@@ -99,7 +98,7 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if(await RunHelperAsync("--version")!="SCTravelHost:0.26.4:protocol29")
+            if(await RunHelperAsync("--version")!="SCTravelHost:0.27.0:protocol30")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             return await RunHelperAsync(game.Id.ToString(),command);
         }
@@ -133,7 +132,7 @@ internal static class DirectLevelLoader
         try
         {
             ValidateGame(game);
-            if(await RunHelperAsync("--version")!="SCTravelHost:0.26.4:protocol29")
+            if(await RunHelperAsync("--version")!="SCTravelHost:0.27.0:protocol30")
                 throw new InvalidOperationException("Loader version mismatch. Run Launch Trainer.cmd.");
             await GameWindowFocus.PrepareAsync(game.MainWindowHandle);
             var reply=await RunHelperAsync(game.Id.ToString(),command);

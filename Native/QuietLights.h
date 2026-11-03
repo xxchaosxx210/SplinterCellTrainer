@@ -11,7 +11,10 @@ static Field quietFields[]={
     {L"Actor",L"bLightChanged",L"BoolProperty"},
     {L"Actor",L"bLightCachingValid",L"BoolProperty"},
     {L"PlayerController",L"LightmapTextureCache",L"IntProperty"},
-    {L"Actor",L"Owner",L"ObjectProperty"}
+    {L"Actor",L"Owner",L"ObjectProperty"},
+    {L"ELight",L"LastTimeChange",L"FloatProperty"},
+    {L"EGameplayObject",L"LastTimeChange",L"FloatProperty"},
+    {L"LevelInfo",L"TimeSeconds",L"FloatProperty"}
 };
 struct QuietLightRef {Byte* object;DWORD index,objectName,level;DWORD original[6];};
 static std::vector<QuietLightRef> quietLights;
@@ -49,6 +52,13 @@ static bool QuietCarried(Byte* object) {
 }
 static void QuietDirty(Byte* object) {
     QuietWrite(object,6,1);QuietWrite(object,7,0);
+    int field=IsA(object,L"ELight")?10:IsA(object,L"EGamePlayObjectLight")?11:-1;
+    auto info=reinterpret_cast<Byte*>(U(object,0x6c));
+    if(field>=0&&Alive(info)){
+        float now=*reinterpret_cast<float*>(info+quietFields[12].offset);
+        auto stamp=reinterpret_cast<float*>(object+quietFields[field].offset);
+        if(std::isfinite(now))*stamp=std::isfinite(*stamp)&&now<=*stamp?std::nextafter(*stamp,INFINITY):now;
+    }
 }
 static void QuietPlayerCache() {
     if(Alive(player,playerIndex))*reinterpret_cast<int*>(player+quietFields[8].offset)=1;
@@ -59,7 +69,7 @@ static void QuietRestore() {
     if(quietReady)for(const auto& ref:quietLights){
         if(!LightPolicy::ShouldRestore(QuietRefAlive(ref),QuietRefAlive(ref)&&QuietDestroyed(ref.object)))continue;
         bool lightChanged=false;
-        for(int i=0;i<6;++i)if(LightPolicy::StillMuted(QuietRead(ref.object,i))&&ref.original[i]!=0){QuietWrite(ref.object,i,ref.original[i]);lightChanged=true;}
+        for(int i=0;i<6;++i)if(LightPolicy::NeedsRestore(QuietRead(ref.object,i),ref.original[i])){QuietWrite(ref.object,i,ref.original[i]);lightChanged=true;}
         if(lightChanged){QuietDirty(ref.object);changed=true;}
     }
     if(changed)QuietPlayerCache();
@@ -106,7 +116,7 @@ static void QuietTick() {
         bool lightChanged=false;
         for(int i=0;i<6;++i){
             DWORD value=QuietRead(it->object,i);
-            if(value){it->original[i]=value;QuietWrite(it->object,i,0);lightChanged=true;}
+            if(value){QuietWrite(it->object,i,0);lightChanged=true;}
         }
         if(lightChanged){QuietDirty(it->object);changed=true;}
         ++it;

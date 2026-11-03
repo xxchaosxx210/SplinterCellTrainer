@@ -9,5 +9,7 @@ int main(){bool ok=true;
  ok&=Check(!LightPolicy::ShouldSuppress(true,true,false,true),"deleted actors are excluded");
  ok&=Check(LightPolicy::ShouldRestore(true,false),"surviving original light can be restored");
  ok&=Check(!LightPolicy::ShouldRestore(false,false)&&!LightPolicy::ShouldRestore(true,true),"reused identities and destroyed fixtures are not restored");
- ok&=Check(LightPolicy::StillMuted(0)&&!LightPolicy::StillMuted(1)&&!LightPolicy::StillMuted(128),"restoration does not overwrite a newer nonzero game value");
+ ok&=Check(LightPolicy::NeedsRestore(0,255),"a muted light restores its captured brightness");
+ ok&=Check(LightPolicy::NeedsRestore(1,128),"engine-modified values restore to the original snapshot on toggle off");
+ ok&=Check(LightPolicy::NeedsRestore(1,0)&&!LightPolicy::NeedsRestore(0,0),"lights that were originally off remain off");
  return ok?0:1;}

@@ -8,7 +8,7 @@ namespace TrainerCheats {
 using Byte = unsigned char;
 using NameFn = const wchar_t* (__thiscall*)(void*);
 struct Field { const wchar_t* owner; const wchar_t* name; const wchar_t* type; DWORD offset=0, mask=0; WORD count=0; };
-enum { Ammo=1, NoReload=2, Gadgets=4, Detection=8, Speed=16, Invisible=32, Noclip=64, BypassLocks=128, QuietLights=256, CamerasOff=512, TurretsOff=1024, IffOff=2048 };
+enum { Ammo=1, NoReload=2, Gadgets=4, Detection=8, Speed=16, Invisible=32, Noclip=64, BypassLocks=128, QuietLights=256, CamerasOff=512, TurretsOff=1024, IffOff=2048, SilentMovement=4096, SilentSam=8192 };
 static Field fields[] = {
     {L"EPlayerController",L"EPawn",L"ObjectProperty"},
     {L"EPawn",L"FullInventory",L"ObjectProperty"},
@@ -92,6 +92,8 @@ static void Resolve() {
         if(!wcscmp(f.type,L"BoolProperty") && (!f.mask || (f.mask&(f.mask-1))))throw 1;
     }
 }
+static void NoiseRestore();
+static void NoiseResolve();
 static void SecurityRestore(DWORD groups);
 static void SecurityClear();
 static void SecurityResolve();
@@ -133,7 +135,8 @@ static void Restore(DWORD groups) {
     }
 }
 static void Stop(bool restore) {
-    if(restore)Restore(4095);
+    NoiseRestore();
+    if(restore)Restore(16383);
     else {LockClear();QuietClear();SecurityClear();}
     saved.clear();guards.clear();activeMask=0;
     if(timer && window)KillTimer(window,timer);
@@ -215,6 +218,7 @@ static void FindGuards() {
 #include "Locks.h"
 #include "QuietLights.h"
 #include "Security.h"
+#include "SilentNoise.h"
 
 static void Tick() {
     if(!Current()||GetTickCount64()-heartbeat>15000){Stop(true);return;}
@@ -252,7 +256,7 @@ static bool HandleRequest(Request* r,void* view,HMODULE core,DWORD* objects) {
         heartbeat=GetTickCount64();
     } else {
         unsigned mask=0;int percent=0;wchar_t extra=0;
-        if(swscanf_s(r->map,L"--cheats:%u:%d%c",&mask,&percent,&extra,1)!=2||mask>4095||percent<50||percent>300){r->result=6;return true;}
+        if(swscanf_s(r->map,L"--cheats:%u:%d%c",&mask,&percent,&extra,1)!=2||mask>16383||percent<50||percent>300){r->result=6;return true;}
         auto vp=static_cast<Byte*>(view);
         auto pc=reinterpret_cast<Byte*>(U(vp,0x34));
         if(activeMask && (pc!=player||!Current()))Stop(true);
@@ -279,7 +283,9 @@ static bool HandleRequest(Request* r,void* view,HMODULE core,DWORD* objects) {
             if((mask&BypassLocks)&&!(activeMask&BypassLocks)){try{LockResolve();}catch(...){r->result=44;return true;}}
             if((mask&QuietLights)&&!(activeMask&QuietLights)){try{QuietResolve();}catch(...){r->result=45;return true;}}
             if((mask&(CamerasOff|TurretsOff|IffOff))&&!(activeMask&(CamerasOff|TurretsOff|IffOff))){try{SecurityResolve();}catch(...){r->result=67;return true;}}
+            if((mask&(SilentMovement|SilentSam))&&!noiseInstalled){try{NoiseResolve();}catch(...){r->result=74;return true;}}
             Restore(static_cast<DWORD>(activeMask)&~mask);
+            if(!(mask&(SilentMovement|SilentSam)))NoiseRestore();
             activeMask=mask;speedPercent=percent;heartbeat=GetTickCount64();nextGuards=0;
             Tick();
             if(!timer)timer=SetTimer(window,0x53435452,16,&TimerProc);

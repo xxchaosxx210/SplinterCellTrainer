@@ -55,6 +55,7 @@ internal sealed class EquipmentMenu : IDisposable
             rows.Add(Row(full?"At game limit":item.Stackable?"Give 1":"Give item","equipment-add:"+key+":1",ready&&!full));
             if(item.Stackable){rows.Add(Row("Give 5","equipment-add:"+key+":5",ready&&!full));
                 rows.Add(new("Set quantity",false,ready,"equipment-set:"+key,null,false,false,new("Item quantity (game limit applies)",Math.Clamp(stock?.Quantity??1,1,999).ToString(CultureInfo.InvariantCulture),MenuInputKind.Quantity,3)));}
+            if(item.Id<=2)rows.Add(Row("Refill ammunition","equipment-refill:"+key+":0",ready&&stock?.Owned==true));
             rows.Add(Row("Equip / select","equipment-select:"+key+":0",ready&&stock?.Owned==true&&stock.Quantity>0));
         }
         rows.Add(Row("Back","back",navigation:true));return new($"equipment:{_page}:{_category}:{_item}",title,rows.ToArray());
@@ -71,8 +72,8 @@ internal sealed class EquipmentMenu : IDisposable
         if(Busy||!Available())return "Wait for the current trainer update to finish.";
         var p=key.Split(':');
         if(p.Length!=4||!int.TryParse(p[1],out int pid)||!int.TryParse(p[2],out int itemId)||!Catalog.Any(i=>i.Id==itemId)||!int.TryParse(p[3],NumberStyles.None,CultureInfo.InvariantCulture,out int quantity))throw new InvalidOperationException("Select a valid equipment action.");
-        int op=p[0] switch{"equipment-add"=>0,"equipment-set"=>1,"equipment-select"=>2,_=>-1};
-        if(op<0||(op==2?quantity!=0:quantity<1||quantity>999))throw new InvalidOperationException("Invalid equipment quantity.");
+        int op=p[0] switch{"equipment-add"=>0,"equipment-set"=>1,"equipment-select"=>2,"equipment-refill"=>3,_=>-1};
+        if(op<0||(op>=2?quantity!=0:quantity<1||quantity>999))throw new InvalidOperationException("Invalid equipment quantity.");
         Busy=true;
         try{
             while(Refreshing){await Task.Delay(25);if(_disposed)throw new InvalidOperationException("Equipment menu closed.");}
@@ -80,9 +81,9 @@ internal sealed class EquipmentMenu : IDisposable
             await RefreshAsync(true);
             var before=Stock(itemId);
             if(op==0&&before?.Owned==true&&before.Maximum>0&&before.Quantity>=before.Maximum)return $"Already at the game's limit: {before.Quantity} / {before.Maximum}.";
-            if(op==2&&Stock(itemId)?.Owned!=true)throw new InvalidOperationException("Give this item to Sam first.");
+            if(op>=2&&Stock(itemId)?.Owned!=true)throw new InvalidOperationException("Give this item to Sam first.");
             string result=await _action(game,itemId,op,quantity);await RefreshAsync(true);
-            if(op!=2){
+            if(op<2){
                 var after=Stock(itemId);
                 if(after?.Owned!=true||after.Quantity<1||after.Maximum<1)throw new InvalidOperationException("Grant not confirmed: the item is missing from Sam's inventory. No success was confirmed.");
                 int target=Math.Min(after.Maximum,op==0?(before?.Owned==true?before.Quantity:0)+quantity:quantity);

@@ -78,7 +78,7 @@ public partial class MainWindow : Window
     private string? _utilityPage;
     private MissionsOverlayMenu? _overlayLevels;
     private LevelChoice[] _levels=Array.Empty<LevelChoice>();
-    private static readonly CheatOptions[] MenuOptions={CheatOptions.UnlimitedAmmo,CheatOptions.NoReload,CheatOptions.UnlimitedGadgets,CheatOptions.ReducedDetection,CheatOptions.MovementSpeed,CheatOptions.Invisibility,CheatOptions.Noclip,CheatOptions.BypassLocks,CheatOptions.QuietLights,CheatOptions.CamerasOff,CheatOptions.TurretsOff,CheatOptions.IffOff};
+    private static readonly CheatOptions[] MenuOptions={CheatOptions.UnlimitedAmmo,CheatOptions.NoReload,CheatOptions.UnlimitedGadgets,CheatOptions.ReducedDetection,CheatOptions.MovementSpeed,CheatOptions.Invisibility,CheatOptions.Noclip,CheatOptions.BypassLocks,CheatOptions.QuietLights,CheatOptions.CamerasOff,CheatOptions.TurretsOff,CheatOptions.IffOff,CheatOptions.SilentMovement,CheatOptions.SilentSam};
     private void StartGameMenu()
     {
         if(_gameMenu is not null)return;
@@ -102,9 +102,9 @@ public partial class MainWindow : Window
         var items=new List<GameMenuEntry> {
             new("Infinite health",InfiniteHealthToggle.IsChecked==true,ready,"cheat:1")
         };
-        string[] labels={"Unlimited ammunition","No reload","Unlimited gadgets","Reduced detection",$"Movement speed ({settings.SpeedPercent/100.0:0.##}x)","Invisibility","Noclip (walls / doors)","Bypass locks","Quiet lights out","Disable security cameras","Deactivate turrets","Disable turret IFF"};
+        string[] labels={"Unlimited ammunition","No reload","Unlimited gadgets","Reduced detection",$"Movement speed ({settings.SpeedPercent/100.0:0.##}x)","Invisibility","Noclip (walls / doors)","Bypass locks","Quiet lights out","Disable security cameras","Deactivate turrets","Disable turret IFF","Silent movement","Silent Sam"};
         for(int i=0;i<MenuOptions.Length;++i){
-            if((MenuOptions[i]&(CheatOptions.CamerasOff|CheatOptions.TurretsOff|CheatOptions.IffOff|CheatOptions.QuietLights|CheatOptions.Invisibility|CheatOptions.ReducedDetection))!=0)continue;
+            if((MenuOptions[i]&(CheatOptions.CamerasOff|CheatOptions.TurretsOff|CheatOptions.IffOff|CheatOptions.QuietLights|CheatOptions.Invisibility|CheatOptions.ReducedDetection|CheatOptions.SilentMovement|CheatOptions.SilentSam))!=0)continue;
             if(MenuOptions[i]==CheatOptions.MovementSpeed)items.Add(new("Movement speed",false,true,"speed-menu",settings.Options.HasFlag(CheatOptions.MovementSpeed)?$"{settings.SpeedPercent/100.0:0.##}x":"OFF",false,true));
             else items.Add(new(labels[i],settings.Options.HasFlag(MenuOptions[i]),ready,$"cheat:{i+2}"));
         }
@@ -128,7 +128,7 @@ public partial class MainWindow : Window
         if(key is "speed-menu" or "tools-menu" or "security-menu" or "stealth-menu"){
             _showOverlayNpcs=false;_showOverlayLevels=false;_utilityPage=key switch {"speed-menu"=>"speed","security-menu"=>"security","stealth-menu"=>"stealth",_=>"tools"};return "";
         }
-        if(key=="back"&&_utilityPage is not null){_utilityPage=_utilityPage is "about" or "exit"?"tools":null;return "";}
+        if(key=="back"&&_utilityPage is not null){_utilityPage=_utilityPage switch {"about" or "exit"=>"tools","alarms-search"=>"security",_=>null};return "";}
         if(_utilityPage is not null&&!((_utilityPage is "security" or "stealth")&&key.StartsWith("cheat:")))return await ActivateUtilityAsync(key);
         if(key=="missions"){
             _showOverlayNpcs=false;_showOverlayLevels=true;_overlayLevels!.Open();return "Run the next objective completion script, or load a level.";
@@ -166,6 +166,44 @@ public partial class MainWindow : Window
         finally{foreach(var game in games)game.Dispose();_worldActionChanging=false;}
     }
 
+    private async Task<string> ApplyAlarmSearchAsync(string key)
+    {
+        if(IsBusy)return "Please wait for the current update.";
+        _worldActionChanging=true;
+        var games=Process.GetProcessesByName("SplinterCell");
+        try
+        {
+            if(games.Length!=1)return "Start one game and load a mission first.";
+            var game=games[0];
+            if(key is "alarm-start" or "alarm-clear")
+                return await DirectLevelLoader.ChangeAlarmAsync(game,key=="alarm-start");
+
+            bool start=key=="search-start";
+            var snapshot=await DirectLevelLoader.ReadNpcsAsync(game);
+            if(snapshot is null)return "Guard list unavailable. Try again in a running mission.";
+            string state=start?"s_Default":"s_Investigate";
+            var eligible=snapshot.Where(n=>n.Present&&n.Controller&&!n.ProtectedGlobal&&n.Condition=="Alive"&&
+                n.AiState.Equals(state,StringComparison.OrdinalIgnoreCase));
+            var targets=start?eligible.Where(n=>float.IsFinite(n.Distance)).OrderBy(n=>n.Distance).Take(1):eligible;
+            int changed=0,skipped=0;
+            foreach(var guard in targets)
+            {
+                try
+                {
+                    await DirectLevelLoader.NpcActionAsync(game,"activity",guard.Id,
+                        activity:start?NpcActivityEdit.Searching:NpcActivityEdit.Idle);
+                    ++changed;
+                }
+                catch(InvalidOperationException){++skipped;}
+            }
+            return start?$"Guards sent to search: {changed}. Skipped: {skipped}."
+                :$"Guard searches cleared: {changed}. Skipped: {skipped}.";
+        }
+        catch(Exception ex) when(ex is InvalidOperationException or System.ComponentModel.Win32Exception or System.IO.IOException)
+        {return ex.Message;}
+        finally{foreach(var game in games)game.Dispose();_worldActionChanging=false;}
+    }
+
     private async Task<string> ApplyWorldActionAsync()
     {
         if(IsBusy)return "Please wait for the current update.";
@@ -187,9 +225,16 @@ public partial class MainWindow : Window
         if(_utilityPage is "security" or "stealth"){
             bool stealth=_utilityPage=="stealth";
             title=stealth?"STEALTH":"SECURITY";var settings=ReadCheatSettings();
-            string[] labels=stealth?new[]{"Quiet lights out","Invisibility","Reduced detection"}:new[]{"Disable security cameras","Deactivate turrets","Disable turret IFF"};
-            CheatOptions[] options=stealth?new[]{CheatOptions.QuietLights,CheatOptions.Invisibility,CheatOptions.ReducedDetection}:new[]{CheatOptions.CamerasOff,CheatOptions.TurretsOff,CheatOptions.IffOff};
+            string[] labels=stealth?new[]{"Quiet lights out","Invisibility","Reduced detection","Silent movement","Silent Sam"}:new[]{"Disable security cameras","Deactivate turrets","Disable turret IFF"};
+            CheatOptions[] options=stealth?new[]{CheatOptions.QuietLights,CheatOptions.Invisibility,CheatOptions.ReducedDetection,CheatOptions.SilentMovement,CheatOptions.SilentSam}:new[]{CheatOptions.CamerasOff,CheatOptions.TurretsOff,CheatOptions.IffOff};
             for(int i=0;i<options.Length;++i)rows.Add(new(labels[i],settings.Options.HasFlag(options[i]),ready,$"cheat:{Array.IndexOf(MenuOptions,options[i])+2}"));
+            if(!stealth)rows.Add(Row("Alarms & Search","alarms-search",navigation:true));
+        } else if(_utilityPage=="alarms-search"){
+            title="ALARMS & SEARCH";
+            rows.Add(Row("Clear active alarm","alarm-clear",ready));
+            rows.Add(Row("Start alarm","alarm-start",ready));
+            rows.Add(Row("Clear guard search","search-clear",ready));
+            rows.Add(Row("Start guard search","search-start",ready));
         } else if(_utilityPage=="speed"){
             title="MOVEMENT SPEED";var settings=ReadCheatSettings();
             rows.Add(new("Enable movement speed",settings.Options.HasFlag(CheatOptions.MovementSpeed),ready,"speed-toggle"));
@@ -215,6 +260,9 @@ public partial class MainWindow : Window
     }
     private async Task<string> ActivateUtilityAsync(string key)
     {
+        if(key=="alarms-search"){_utilityPage="alarms-search";return "";}
+        if(_utilityPage=="alarms-search"&&key is ("alarm-clear" or "alarm-start" or "search-clear" or "search-start"))
+            return await ApplyAlarmSearchAsync(key);
         if(key=="about"){_utilityPage="about";return "";}
         if(key=="exit-menu"){_utilityPage="exit";return "The game will remain running.";}
         if(key=="exit-cancel"){_utilityPage="tools";return "Exit cancelled.";}
@@ -350,12 +398,12 @@ public partial class MainWindow : Window
         e.Cancel=true;RequestExit();
     }
     private CheatSession? _cheatSession;
-    private CheatOptions _securityOptions;
+    private CheatOptions _overlayOptions;
     private bool _cheatsChanging, _cheatRefreshBusy, _cheatControlsReady;
 
     private CheatSettings ReadCheatSettings()
     {
-        CheatOptions options=_securityOptions;
+        CheatOptions options=_overlayOptions;
         if(UnlimitedAmmoToggle.IsChecked==true)options|=CheatOptions.UnlimitedAmmo;
         if(NoReloadToggle.IsChecked==true)options|=CheatOptions.NoReload;
         if(UnlimitedGadgetsToggle.IsChecked==true)options|=CheatOptions.UnlimitedGadgets;
@@ -379,7 +427,7 @@ public partial class MainWindow : Window
 
     private void ShowCheatSettings(CheatSettings settings)
     {
-        _securityOptions=settings.Options&(CheatOptions.CamerasOff|CheatOptions.TurretsOff|CheatOptions.IffOff);
+        _overlayOptions=settings.Options&(CheatOptions.CamerasOff|CheatOptions.TurretsOff|CheatOptions.IffOff|CheatOptions.SilentMovement|CheatOptions.SilentSam);
         UnlimitedAmmoToggle.IsChecked=settings.Options.HasFlag(CheatOptions.UnlimitedAmmo);
         NoReloadToggle.IsChecked=settings.Options.HasFlag(CheatOptions.NoReload);
         UnlimitedGadgetsToggle.IsChecked=settings.Options.HasFlag(CheatOptions.UnlimitedGadgets);

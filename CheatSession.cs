@@ -6,13 +6,13 @@ using Microsoft.Win32.SafeHandles;
 namespace SCTrainer;
 
 [Flags]
-public enum CheatOptions { None=0, UnlimitedAmmo=1, NoReload=2, UnlimitedGadgets=4, ReducedDetection=8, MovementSpeed=16, Invisibility=32, Noclip=64, BypassLocks=128, QuietLights=256, CamerasOff=512, TurretsOff=1024, IffOff=2048 }
+public enum CheatOptions { None=0, UnlimitedAmmo=1, NoReload=2, UnlimitedGadgets=4, ReducedDetection=8, MovementSpeed=16, Invisibility=32, Noclip=64, BypassLocks=128, QuietLights=256, CamerasOff=512, TurretsOff=1024, IffOff=2048, SilentMovement=4096, SilentSam=8192 }
 
 public sealed record CheatSettings(CheatOptions Options, int SpeedPercent=100)
 {
     public void Validate()
     {
-        if (((int)Options & ~4095) != 0 || SpeedPercent < 50 || SpeedPercent > 300)
+        if (((int)Options & ~16383) != 0 || SpeedPercent < 50 || SpeedPercent > 300)
             throw new ArgumentOutOfRangeException(nameof(SpeedPercent), "Speed must be between 0.5x and 3x.");
     }
     public string Command { get { Validate(); return $"--cheats:{(int)Options}:{SpeedPercent}"; } }

@@ -5,9 +5,9 @@
 #include "EquipmentProtocol.h"
 
 struct Request { DWORD version; DWORD pid; HWND window; LONG result; wchar_t map[128]; };
-static constexpr DWORD Version = 32;
-static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v32";
-static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v32.%lu", pid); }
+static constexpr DWORD Version = 35;
+static const wchar_t* MessageName = L"SCTrainer.DirectTravel.v35";
+static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\SCTrainer.Travel.v35.%lu", pid); }
 
 #ifdef BRIDGE_DLL
 #include "Cheats.h"
@@ -16,6 +16,7 @@ static void MappingName(wchar_t* out, DWORD pid) { swprintf_s(out, 80, L"Local\\
 #include "Fighting.h"
 #include "Equipment.h"
 #include "Objectives.h"
+#include "Alarms.h"
 #ifdef SC_TRAVEL_DIAGNOSTICS
 static wchar_t faultPath[MAX_PATH];
 static LONG faultCount = 0;
@@ -102,6 +103,7 @@ static void Handle(Request* r) {
         if (TrainerSpawn::SafeRequest(r, viewport, core, engine, objects)) return;
         if (TrainerFighting::Handle(r, viewport, core, objects)) return;
         if (TrainerEquipment::Handle(r, viewport, core, engine, objects)) return;
+        if (TrainerAlarms::Handle(r, viewport, core, objects)) return;
         if (TrainerObjectives::Handle(r, viewport, core, objects)) return;
         if (!wcscmp(r->map, L"--health-on") || !wcscmp(r->map, L"--health-off")) {
             bool enable = !wcscmp(r->map, L"--health-on");
@@ -191,7 +193,7 @@ static BOOL CALLBACK FindWindow(HWND window, LPARAM context) {
     return TRUE;
 }
 int wmain(int argc, wchar_t** argv) {
-    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.28.0:protocol32"); return 0; }
+    if (argc == 2 && !wcscmp(argv[1], L"--version")) { puts("SCTravelHost:0.29.0:protocol35"); return 0; }
     if (argc != 3) { puts("Expected process ID and map."); return 2; }
     Search search = { wcstoul(argv[1], nullptr, 10), nullptr };
     EnumWindows(FindWindow, reinterpret_cast<LPARAM>(&search));
@@ -256,6 +258,9 @@ int wmain(int argc, wchar_t** argv) {
     switch (result) {
     case 68: puts("Objective metadata or completion could not be verified. No further objectives attempted.");return 40;
     case 69: wprintf(L"%s\n",requestMap);return 0;
+    case 74: puts("Sam noise filtering is unavailable for this game build.");return 44;
+    case 72: puts("Alarm script unavailable for this game state.");return 43;
+    case 73: wprintf(L"%s\n",requestMap);return 0;
     case 71: wprintf(L"%s\n",requestMap);return 42;
     case 70: puts("Return to normal gameplay before completing an objective.");return 41;
     case 67: puts("Security toggles are unavailable for the loaded sensor scripts. No security changes applied.");return 39;

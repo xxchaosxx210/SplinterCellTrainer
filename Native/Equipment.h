@@ -21,8 +21,8 @@ static bool HandleImpl(Request* r,void* view,HMODULE core,HMODULE engine,DWORD* 
     bool probe=swscanf_s(r->map,L"--equipment-probe:%d%c",&id,&extra,1)==1;
     if(probe&&(id<1||id>17)){r->result=6;return true;}
     if(!list&&!probe&&wcsncmp(r->map,L"--equipment:",12))return false;
-    if(!list&&!probe&&(swscanf_s(r->map,L"--equipment:%d:%d:%d%c",&id,&op,&quantity,&extra,1)!=3||id<1||id>17||op<0||op>2||
-        (op!=2&&(quantity<1||quantity>999))||(op==2&&quantity!=0))){r->result=6;return true;}
+    if(!list&&!probe&&(swscanf_s(r->map,L"--equipment:%d:%d:%d%c",&id,&op,&quantity,&extra,1)!=3||id<1||id>17||op<0||op>3||
+        (op<2&&(quantity<1||quantity>999))||(op>=2&&quantity!=0)||(op==3&&id>2))){r->result=6;return true;}
     stage=L"reading inventory metadata";objectArray=objects;name=reinterpret_cast<NameFn>(GetProcAddress(core,"?GetName@UObject@@QBEPBGXZ"));
     auto find=reinterpret_cast<TrainerSpawn::FindFn>(GetProcAddress(core,"?FindFunction@UObject@@QAEPAVUFunction@@VFName@@H@Z"));
     auto event=reinterpret_cast<TrainerSpawn::EventFn>(GetProcAddress(core,"?ProcessEvent@UObject@@UAEXPAVUFunction@@PAX1@Z"));
@@ -52,6 +52,16 @@ static bool HandleImpl(Request* r,void* view,HMODULE core,HMODULE engine,DWORD* 
     if(!probe&&wcscmp(TrainerSpawn::State(pc,name),L"s_PlayerWalking")){r->result=56;return true;}
     stage=L"finding existing item";auto item=FindItem(inventory,itemsField,id);
     if(probe&&item){swprintf_s(r->map,L"%s already owned (%d / %d).",classes[id-1],static_cast<int>(U(item,q)),static_cast<int>(U(item,maximum)));r->result=51;return true;}
+    const bool fillWeapon=id<=2&&(op==3||(!item&&op<2));
+    DWORD ammo=0,maxAmmo=0,clip=0,maxClip=0;
+    if(fillWeapon){
+        ammo=Property(objects,name,L"EWeapon",L"Ammo");
+        maxAmmo=Property(objects,name,L"EWeapon",L"MaxAmmo");
+        clip=Property(objects,name,L"EWeapon",L"ClipAmmo");
+        maxClip=Property(objects,name,L"EWeapon",L"ClipMaxAmmo");
+        if(!ammo||!maxAmmo||!clip||!maxClip){r->result=52;return true;}
+    }
+    if(op==3&&!item){r->result=53;return true;}
     if(op==0&&item&&static_cast<int>(U(item,q))>=static_cast<int>(U(item,maximum))){
         swprintf_s(r->map,L"Already at the game's limit: %s %d / %d.",classes[id-1],static_cast<int>(U(item,q)),static_cast<int>(U(item,maximum)));
         r->result=51;return true;
@@ -112,11 +122,21 @@ static bool HandleImpl(Request* r,void* view,HMODULE core,HMODULE engine,DWORD* 
             }
             r->result=52;return true;
         }
-    }else{
+    }else if(op<2){
         int limit=static_cast<int>(U(item,maximum)),current=static_cast<int>(U(item,q));
         if(limit<1||limit>10000||current<0||current>10000){r->result=52;return true;}
         int value=op==0?current+quantity:quantity;
         *reinterpret_cast<int*>(item+q)=value<limit?value:limit;
+    }
+    if(fillWeapon){
+        const DWORD total=U(item,maxAmmo),magazine=U(item,maxClip);
+        if(!IsA(item,L"EWeapon")||magazine<1||magazine>1000||total<magazine||total>100000){r->result=52;return true;}
+        *reinterpret_cast<DWORD*>(item+ammo)=total;
+        *reinterpret_cast<DWORD*>(item+clip)=magazine;
+        if(op==3){
+            swprintf_s(r->map,L"Ammunition refilled: %lu in magazine, %lu in reserve.",magazine,total-magazine);
+            r->result=51;return true;
+        }
     }
     swprintf_s(r->map,L"%s: %d / %d (game limit).",classes[id-1],static_cast<int>(U(item,q)),static_cast<int>(U(item,maximum)));
     r->result=51;return true;

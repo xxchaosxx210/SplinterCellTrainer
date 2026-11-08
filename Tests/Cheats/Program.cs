@@ -15,7 +15,7 @@ catch(ArgumentOutOfRangeException){Console.WriteLine("PASS: out-of-range speed r
 Check(new CheatSettings(CheatOptions.Invisibility).Command=="--cheats:32:100","invisibility does not enable health or other cheats");
 Check(new CheatSettings(CheatOptions.Noclip).Command=="--cheats:64:100","noclip is independently selectable");
 Check(new CheatSettings(CheatOptions.Invisibility|CheatOptions.Noclip).Command=="--cheats:96:100","invisibility and noclip combine independently");
-try { new CheatSettings((CheatOptions)16384).Validate();throw new Exception("Unknown option accepted"); }
+try { new CheatSettings((CheatOptions)32768).Validate();throw new Exception("Unknown option accepted"); }
 catch(ArgumentOutOfRangeException){Console.WriteLine("PASS: unknown option rejected");}
 Check(new CheatSettings(CheatOptions.BypassLocks).Command=="--cheats:128:100","lock bypass is independently selectable");
 Check(new CheatSettings(CheatOptions.BypassLocks|CheatOptions.Invisibility).Command=="--cheats:160:100","lock bypass preserves independent visibility selection");
@@ -27,6 +27,7 @@ Check(new CheatSettings(CheatOptions.IffOff).Command=="--cheats:2048:100","IFF d
 Check(new CheatSettings(CheatOptions.CamerasOff|CheatOptions.TurretsOff|CheatOptions.IffOff|CheatOptions.QuietLights).Command=="--cheats:3840:100","security and lighting toggles combine without changing player cheats");
 Check(new CheatSettings(CheatOptions.SilentMovement).Command=="--cheats:4096:100","silent movement has an independent option");
 Check(new CheatSettings(CheatOptions.SilentSam|CheatOptions.SilentMovement).Command=="--cheats:12288:100","both sound toggles combine without selecting other cheats");
+Check(new CheatSettings(CheatOptions.InvisibleSam).Command=="--cheats:16384:100","visible-model Invisible Sam is independent from model hiding and debug cheats");
 if(!args.Contains("--live")){Console.WriteLine("Pass --live to test against one running mission.");return;}
 
 var games=Process.GetProcessesByName("SplinterCell");

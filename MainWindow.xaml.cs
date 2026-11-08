@@ -78,7 +78,7 @@ public partial class MainWindow : Window
     private string? _utilityPage;
     private MissionsOverlayMenu? _overlayLevels;
     private LevelChoice[] _levels=Array.Empty<LevelChoice>();
-    private static readonly CheatOptions[] MenuOptions={CheatOptions.UnlimitedAmmo,CheatOptions.NoReload,CheatOptions.UnlimitedGadgets,CheatOptions.ReducedDetection,CheatOptions.MovementSpeed,CheatOptions.Invisibility,CheatOptions.Noclip,CheatOptions.BypassLocks,CheatOptions.QuietLights,CheatOptions.CamerasOff,CheatOptions.TurretsOff,CheatOptions.IffOff,CheatOptions.SilentMovement,CheatOptions.SilentSam};
+    private static readonly CheatOptions[] MenuOptions={CheatOptions.UnlimitedAmmo,CheatOptions.NoReload,CheatOptions.UnlimitedGadgets,CheatOptions.ReducedDetection,CheatOptions.MovementSpeed,CheatOptions.Invisibility,CheatOptions.Noclip,CheatOptions.BypassLocks,CheatOptions.QuietLights,CheatOptions.CamerasOff,CheatOptions.TurretsOff,CheatOptions.IffOff,CheatOptions.SilentMovement,CheatOptions.SilentSam,CheatOptions.InvisibleSam};
     private void StartGameMenu()
     {
         if(_gameMenu is not null)return;
@@ -102,9 +102,9 @@ public partial class MainWindow : Window
         var items=new List<GameMenuEntry> {
             new("Infinite health",InfiniteHealthToggle.IsChecked==true,ready,"cheat:1")
         };
-        string[] labels={"Unlimited ammunition","No reload","Unlimited gadgets","Reduced detection",$"Movement speed ({settings.SpeedPercent/100.0:0.##}x)","Invisibility","Noclip (walls / doors)","Bypass locks","Quiet lights out","Disable security cameras","Deactivate turrets","Disable turret IFF","Silent movement","Silent Sam"};
+        string[] labels={"Unlimited ammunition","No reload","Unlimited gadgets","Reduced detection",$"Movement speed ({settings.SpeedPercent/100.0:0.##}x)","Hide Sam model","Noclip (walls / doors)","Bypass locks","Quiet lights out","Disable security cameras","Deactivate turrets","Disable turret IFF","Silent movement","Silent Sam","Invisible Sam"};
         for(int i=0;i<MenuOptions.Length;++i){
-            if((MenuOptions[i]&(CheatOptions.CamerasOff|CheatOptions.TurretsOff|CheatOptions.IffOff|CheatOptions.QuietLights|CheatOptions.Invisibility|CheatOptions.ReducedDetection|CheatOptions.SilentMovement|CheatOptions.SilentSam))!=0)continue;
+            if((MenuOptions[i]&(CheatOptions.CamerasOff|CheatOptions.TurretsOff|CheatOptions.IffOff|CheatOptions.QuietLights|CheatOptions.Invisibility|CheatOptions.ReducedDetection|CheatOptions.SilentMovement|CheatOptions.SilentSam|CheatOptions.InvisibleSam))!=0)continue;
             if(MenuOptions[i]==CheatOptions.MovementSpeed)items.Add(new("Movement speed",false,true,"speed-menu",settings.Options.HasFlag(CheatOptions.MovementSpeed)?$"{settings.SpeedPercent/100.0:0.##}x":"OFF",false,true));
             else items.Add(new(labels[i],settings.Options.HasFlag(MenuOptions[i]),ready,$"cheat:{i+2}"));
         }
@@ -225,8 +225,8 @@ public partial class MainWindow : Window
         if(_utilityPage is "security" or "stealth"){
             bool stealth=_utilityPage=="stealth";
             title=stealth?"STEALTH":"SECURITY";var settings=ReadCheatSettings();
-            string[] labels=stealth?new[]{"Quiet lights out","Invisibility","Reduced detection","Silent movement","Silent Sam"}:new[]{"Disable security cameras","Deactivate turrets","Disable turret IFF"};
-            CheatOptions[] options=stealth?new[]{CheatOptions.QuietLights,CheatOptions.Invisibility,CheatOptions.ReducedDetection,CheatOptions.SilentMovement,CheatOptions.SilentSam}:new[]{CheatOptions.CamerasOff,CheatOptions.TurretsOff,CheatOptions.IffOff};
+            string[] labels=stealth?new[]{"Quiet lights out","Hide Sam model","Reduced detection","Silent movement","Silent Sam","Invisible Sam"}:new[]{"Disable security cameras","Deactivate turrets","Disable turret IFF"};
+            CheatOptions[] options=stealth?new[]{CheatOptions.QuietLights,CheatOptions.Invisibility,CheatOptions.ReducedDetection,CheatOptions.SilentMovement,CheatOptions.SilentSam,CheatOptions.InvisibleSam}:new[]{CheatOptions.CamerasOff,CheatOptions.TurretsOff,CheatOptions.IffOff};
             for(int i=0;i<options.Length;++i)rows.Add(new(labels[i],settings.Options.HasFlag(options[i]),ready,$"cheat:{Array.IndexOf(MenuOptions,options[i])+2}"));
             if(!stealth)rows.Add(Row("Alarms & Search","alarms-search",navigation:true));
         } else if(_utilityPage=="alarms-search"){
@@ -427,7 +427,7 @@ public partial class MainWindow : Window
 
     private void ShowCheatSettings(CheatSettings settings)
     {
-        _overlayOptions=settings.Options&(CheatOptions.CamerasOff|CheatOptions.TurretsOff|CheatOptions.IffOff|CheatOptions.SilentMovement|CheatOptions.SilentSam);
+        _overlayOptions=settings.Options&(CheatOptions.CamerasOff|CheatOptions.TurretsOff|CheatOptions.IffOff|CheatOptions.SilentMovement|CheatOptions.SilentSam|CheatOptions.InvisibleSam);
         UnlimitedAmmoToggle.IsChecked=settings.Options.HasFlag(CheatOptions.UnlimitedAmmo);
         NoReloadToggle.IsChecked=settings.Options.HasFlag(CheatOptions.NoReload);
         UnlimitedGadgetsToggle.IsChecked=settings.Options.HasFlag(CheatOptions.UnlimitedGadgets);
@@ -456,6 +456,8 @@ public partial class MainWindow : Window
     private async Task<bool> ApplyCheatSettingsAsync(CheatSettings settings)
     {
         if(_cheatsChanging)return false;
+        if(settings.Options.HasFlag(CheatOptions.InvisibleSam))
+            settings=settings with {Options=settings.Options&~CheatOptions.Invisibility};
         _cheatsChanging=true;SetCheatControls(false);
         try
         {

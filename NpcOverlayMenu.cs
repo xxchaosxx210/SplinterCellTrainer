@@ -31,6 +31,9 @@ internal sealed class NpcOverlayMenu : IDisposable
     private Func<bool>? _readEsp,_canToggleEsp;
     private Func<string>? _toggleEsp;
     public void ConfigureEsp(Func<bool> read,Func<string> toggle,Func<bool> available){_readEsp=read;_toggleEsp=toggle;_canToggleEsp=available;}
+    private Func<bool>? _readFight;
+    private Func<Task<string>>? _toggleFight;
+    public void ConfigureFight(Func<bool> read,Func<Task<string>> toggle){_readFight=read;_toggleFight=toggle;}
     private enum Page { Spawn, Roster, Edit, Condition, Activity, Health, Position, Details, RemoveAll, GlobalCondition, GlobalActivity, GlobalConfirm, Global, Filter, Scope, Cleanup, RemoveOne, MoveDistance }
     private Page _page;
     private sealed record GlobalEdit(int Pid,uint[] Ids,NpcConditionEdit? Condition,NpcActivityEdit? Activity,string Label,Page Parent,int Token,string Scope,bool Freeze=false,bool Move=false,int Metres=3);
@@ -77,6 +80,7 @@ internal sealed class NpcOverlayMenu : IDisposable
             switch(_page) {
                 case Page.Spawn:
                     rows.Add(new("Enemy ESP",_readEsp?.Invoke()==true,!Busy&&_toggleEsp is not null&&_canToggleEsp?.Invoke()==true,"npc-esp"));
+                    if(_toggleFight is not null)rows.Add(new("Enemies fight each other",_readFight?.Invoke()==true,!Busy&&_canToggleEsp?.Invoke()==true,"npc-fight"));
                     rows.Add(Row("Spawn guard","spawn",ready&&Spawned.Length<8,$"{Spawned.Length} / 8"));
                     rows.Add(Row("Browse NPCs","browse",navigation:true));
                     rows.Add(Row("Global controls","global-menu",navigation:true));
@@ -267,6 +271,10 @@ internal sealed class NpcOverlayMenu : IDisposable
             if(Busy||Selected is null||Selected.TrainerSpawned)return "Select a map NPC outside a pending update.";
             if(!_moveExcluded.Add(Selected.Id))_moveExcluded.Remove(Selected.Id);
             return _moveExcluded.Contains(Selected.Id)?"NPC excluded from group moves.":"NPC included in group moves.";
+        }
+        if(key=="npc-fight"){
+            if(Busy||_toggleFight is null||_canToggleEsp?.Invoke()!=true)return "Wait for the current trainer update to finish.";
+            return await _toggleFight();
         }
         if(key=="npc-esp"){
             if(Busy||_toggleEsp is null||_canToggleEsp?.Invoke()!=true)return "Wait for the current trainer update to finish.";

@@ -7,6 +7,8 @@ using TrainerSpawn::Property;
 struct Record {Byte* pawn;Byte* controller;DWORD index,controllerIndex;void* add;};
 static Record participants[256]={};
 static int participantCount=0,attackType=0,guardType=0,moveFlags=0;
+static DWORD defaultState=0;
+static TrainerSpawn::FindFn findFunction=nullptr;
 static DWORD healthOffset=0,controlOffset=0,pawnOffset=0,goalListOffset=0,headOffset=0,goalTypeOffset=0,goalTargetOffset=0,
     goalFocusOffset=0,goalUpdateOffset=0,goalUpdateMask=0,fireTargetOffset=0,enemyOffset=0,seenOffset=0,seenMask=0,alertState=0,shootOffset=0,shootMask=0,initializedOffset=0,initializedMask=0,goalLocationOffset=0;
 static Byte *sessionLevel=nullptr,*sessionViewport=nullptr,*sessionPlayer=nullptr;static DWORD levelIndex=0,sessionPlayerIndex=0,sessionViewportIndex=0;
@@ -21,7 +23,25 @@ static bool Live(const Record& r) {
     return (!wcscmp(state,L"s_Default")||!wcscmp(state,L"s_Investigate")||!wcscmp(state,L"s_Alert"))&&
         !TrainerSpawn::Unconscious(ps,state)&&wcscmp(ps,L"s_Grabbed");
 }
+static void ResetParticipant(const Record& record) {
+    __try {
+        if(!Live(record))return;
+        auto reset=TrainerSpawn::Function(record.controller,L"ResetGoalList",objectArray,name,findFunction);
+        if(!reset)return;
+        *reinterpret_cast<DWORD*>(record.controller+shootOffset)&=~shootMask;
+        *reinterpret_cast<DWORD*>(record.controller+seenOffset)&=~seenMask;
+        *reinterpret_cast<Byte**>(record.controller+enemyOffset)=nullptr;
+        *reinterpret_cast<Byte**>(record.controller+fireTargetOffset)=nullptr;
+        dispatch(record.controller,reset,nullptr,nullptr);
+        gotoState(record.controller,defaultState);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
 static void Stop() {
+    const bool sameLevel=Alive(sessionPlayer,sessionPlayerIndex)&&Alive(sessionLevel,levelIndex)&&
+        U(sessionPlayer,0x6c)==reinterpret_cast<DWORD>(sessionLevel);
+    if(sameLevel&&dispatch&&findFunction&&gotoState&&defaultState)
+        for(int i=0;i<participantCount;++i)ResetParticipant(participants[i]);
+
     if(sessionTimer&&sessionWindow)KillTimer(sessionWindow,sessionTimer);
     sessionTimer=0;sessionWindow=nullptr;participantCount=0;sessionLevel=nullptr;
 }
@@ -63,7 +83,7 @@ static void Maintain() {
         }else{
             alignas(4) Byte params[0x54]={};params[0]=static_cast<Byte>(attackType);params[1]=255;
             memcpy(params+4,a.pawn+0xd4,12);memcpy(params+0x10,target+0xd4,12);memcpy(params+0x1c,&target,4);
-            DWORD force=1;float seconds=static_cast<float>(deadline>GetTickCount64()?deadline-GetTickCount64():0)/1000.0f;
+            DWORD force=1;float seconds=30;
             memcpy(params+0x2c,&force,4);memcpy(params+0x30,&seconds,4);
             params[0x34]=static_cast<Byte>(moveFlags);params[0x44]=static_cast<Byte>(moveFlags);
             dispatch(a.controller,a.add,params,nullptr);
@@ -75,6 +95,14 @@ static void CALLBACK TimerProc(HWND,UINT,UINT_PTR,DWORD) {
     __try { Maintain(); } __except(EXCEPTION_EXECUTE_HANDLER) { Stop(); }
 }
 static bool Handle(Request* r,void* view,HMODULE core,DWORD* objects) {
+    bool off=!wcscmp(r->map,L"--guards-fight-off");
+    bool ping=!wcscmp(r->map,L"--guards-fight-ping");
+    if(off){Stop();wcscpy_s(r->map,L"Enemies fight each other OFF. Normal AI resumed.");r->result=48;return true;}
+    if(ping){
+        if(sessionTimer)Maintain();
+        if(sessionTimer)deadline=GetTickCount64()+15000;
+        wcscpy_s(r->map,sessionTimer?L"FIGHT:ON":L"FIGHT:OFF");r->result=48;return true;
+    }
     if(wcscmp(r->map,L"--guards-fight"))return false;
     objectArray=objects;name=reinterpret_cast<NameFn>(GetProcAddress(core,"?GetName@UObject@@QBEPBGXZ"));
     auto find=reinterpret_cast<TrainerSpawn::FindFn>(GetProcAddress(core,"?FindFunction@UObject@@QAEPAVUFunction@@VFName@@H@Z"));
@@ -89,17 +117,18 @@ static bool Handle(Request* r,void* view,HMODULE core,DWORD* objects) {
         cp=Property(objects,name,L"Controller",L"Pawn"),weapon=Property(objects,name,L"EPawn",L"CurrentWeapon"),
         group=Property(objects,name,L"EAIController",L"Group");
     Field hostile={L"EPawn",L"bHostile",L"BoolProperty"};
-    DWORD alert=0;auto table=reinterpret_cast<Byte**>(objects[0]);
+    DWORD alert=0,normal=0;auto table=reinterpret_cast<Byte**>(objects[0]);
     for(DWORD i=0;i<objects[1];++i){
         auto obj=table[i];if(!Alive(obj))continue;
         auto owner=reinterpret_cast<Byte*>(U(obj,0x18));if(!Alive(owner))continue;
         if(!wcscmp(name(owner),L"EAIController")&&IsA(obj,L"State")&&!wcscmp(name(obj),L"s_Alert"))alert=U(obj,0x20);
+        if(!wcscmp(name(owner),L"EAIController")&&IsA(obj,L"State")&&!wcscmp(name(obj),L"s_Default"))normal=U(obj,0x20);
         if(!wcscmp(name(owner),hostile.owner)&&!wcscmp(name(obj),hostile.name)&&IsA(obj,L"BoolProperty")){hostile.offset=U(obj,0x44);hostile.mask=U(obj,0x54);}
     }
     int attack=TrainerSpawn::EnumValue(core,objects,name,L"GoalType",L"GOAL_Attack");
     int guard=TrainerSpawn::EnumValue(core,objects,name,L"GoalType",L"GOAL_Guard");
     int flags=TrainerSpawn::EnumValue(core,objects,name,L"MoveFlags",L"MOVE_WalkAlert");
-    if(!hp||!control||!cp||!weapon||!group||!hostile.offset||!hostile.mask||!alert||attack<0||guard<0||flags<0){r->result=49;return true;}
+    if(!hp||!control||!cp||!weapon||!group||!hostile.offset||!hostile.mask||!normal||!alert||attack<0||guard<0||flags<0){r->result=49;return true;}
     Record records[256]={};FightPolicy::Candidate positions[256]={};int count=0;
     for(DWORD i=0;i<objects[1];++i){
         auto p=table[i];if(!IsA(p,L"EAIPawn")||IsA(p,L"EAINonHostile"))continue;
@@ -141,12 +170,13 @@ static bool Handle(Request* r,void* view,HMODULE core,DWORD* objects) {
     if(!goalListOffset||!headOffset||!goalTypeOffset||!goalTargetOffset||!goalFocusOffset||!fireTargetOffset||!enemyOffset||
         !goalLocationOffset||!bools[0].offset||!bools[0].mask||!bools[1].offset||!bools[1].mask||!bools[2].offset||!bools[2].mask||!bools[3].offset||!bools[3].mask){r->result=49;return true;}
     Stop();
+    defaultState=normal;findFunction=find;
     healthOffset=hp;controlOffset=control;pawnOffset=cp;seenOffset=bools[0].offset;seenMask=bools[0].mask;
     shootOffset=bools[2].offset;shootMask=bools[2].mask;initializedOffset=bools[3].offset;initializedMask=bools[3].mask;guardType=guard;
     goalUpdateOffset=bools[1].offset;goalUpdateMask=bools[1].mask;attackType=attack;moveFlags=flags;alertState=alert;
     sessionViewport=static_cast<Byte*>(view);sessionViewportIndex=U(sessionViewport,4);sessionPlayer=pc;sessionPlayerIndex=U(pc,4);
     sessionLevel=info;levelIndex=U(info,4);sessionWindow=r->window;dispatch=process;gotoState=go;
-    deadline=GetTickCount64()+30000;participantCount=count;memcpy(participants,records,sizeof(Record)*count);
+    deadline=GetTickCount64()+15000;participantCount=count;memcpy(participants,records,sizeof(Record)*count);
     sessionTimer=SetTimer(sessionWindow,0x53434654,16,&TimerProc);
     if(!sessionTimer){Stop();r->result=49;return true;}
     int changed=0;
@@ -163,7 +193,7 @@ static bool Handle(Request* r,void* view,HMODULE core,DWORD* objects) {
         go(a.controller,alert);process(a.controller,a.add,params,nullptr);++changed;
     }
     Maintain();
-    swprintf_s(r->map,L"Maintaining %d guards against nearby guards for 30 seconds.",changed);
+    swprintf_s(r->map,L"Enemies fight each other ON (%d guards).",changed);
     r->result=48;return true;
 }
 }

@@ -16,6 +16,7 @@ public partial class MainWindow : Window
             EnemyEspToggle.IsChecked=EnemyEspToggle.IsChecked!=true;
             return EspStatus.Text;
         },()=>!IsBusy&&!_shutdownRunning);
+        _overlayNpcs.ConfigureFight(()=>_fightEnabled,ToggleFightAsync);
         _equipment.Available=()=>!_levelLoading&&!_shutdownRunning&&!_overlayNpcs.Busy&&!_healthChanging&&!_cheatsChanging&&!_cheatRefreshBusy&&!_worldActionChanging;
         _cheatControlsReady=true;
         // WPF work-area dimensions already account for Windows display scaling.
@@ -37,7 +38,7 @@ public partial class MainWindow : Window
     // The former window is a hidden control host during the tray migration; it is never shown.
     public event Action? ExitRequested;
     private bool _shutdownRunning,_shutdownApproved,_worldActionChanging;
-    public bool IsBusy=>_equipment.Busy||_equipment.Refreshing||_levelLoading||_overlayNpcs.Busy||_overlayNpcs.Refreshing||_healthChanging||_cheatsChanging||_cheatRefreshBusy||_worldActionChanging;
+    public bool IsBusy=>_fightPingBusy||_equipment.Busy||_equipment.Refreshing||_levelLoading||_overlayNpcs.Busy||_overlayNpcs.Refreshing||_healthChanging||_cheatsChanging||_cheatRefreshBusy||_worldActionChanging;
     public void StartBackground()=>StartGameMenu();
     internal TrainerStatusSnapshot Status=>new(GameStatus.Text,GameDetail.Text,MenuStatus.Text,CheatStatus.Text,HealthStatus.Text,LevelStatus.Text,
         GameStatus.Text=="Game detected",MenuStatus.Text.StartsWith("In-game menu unavailable",StringComparison.Ordinal),_shutdownRunning);
@@ -58,6 +59,13 @@ public partial class MainWindow : Window
         try {
             var waiting=Stopwatch.StartNew();
             while(IsBusy){if(waiting.Elapsed>TimeSpan.FromSeconds(60)){MenuStatus.Text="An update is still running. Wait for it to finish, then retry Exit.";return false;}await Task.Delay(100);}
+            if(_fightEnabled){
+                try {
+                    using var game=Process.GetProcessById(_fightPid);
+                    await DirectLevelLoader.FightGuardsAsync(game,false);
+                } catch(ArgumentException) { }
+                _fightEnabled=false;
+            }
             try{await _overlayNpcs.RestoreFrozenAsync();}
             catch(Exception ex) when(ex is InvalidOperationException or System.ComponentModel.Win32Exception or System.IO.IOException){MenuStatus.Text="Could not restore frozen NPCs: "+ex.Message;return false;}
             if(!await ApplyCheatSettingsAsync(new(CheatOptions.None))||!await SetInfiniteHealthAsync(false))return false;
@@ -110,7 +118,6 @@ public partial class MainWindow : Window
         }
         items.Add(new("Stealth",false,true,"stealth-menu",null,false,true));
         items.Add(new("Security",false,true,"security-menu",null,false,true));
-        items.Add(new("Enemies fight each other (30s)",false,ready,"guards-fight",null,false));
         items.Add(new("Trainer tools / About / Exit",false,true,"tools-menu",null,false,true));
         items.Insert(0,new("Sam Equipment",false,true,"equipment",null,false,true));
         items.Insert(0,new("NPC Manager",false,true,"npcs",null,false,true));
@@ -142,7 +149,6 @@ public partial class MainWindow : Window
         }
         if(key=="back"){if(!_overlayNpcs.Back())_showOverlayNpcs=false;return "";}
         if(_showOverlayNpcs){if(_levelLoading)return "Wait for level loading to finish.";return await _overlayNpcs.ActivateAsync(key);}
-        if(key=="guards-fight")return await ApplyWorldActionAsync();
         if(!key.StartsWith("cheat:")||!int.TryParse(key.AsSpan(6),out int selected))return "Select an option.";
         if(_levelLoading||_healthChanging||_cheatsChanging||_cheatRefreshBusy||_worldActionChanging)return "Please wait for the current update.";
         if(selected==0){EnemyEspToggle.IsChecked=EnemyEspToggle.IsChecked!=true;return EspStatus.Text;}
@@ -204,17 +210,38 @@ public partial class MainWindow : Window
         finally{foreach(var game in games)game.Dispose();_worldActionChanging=false;}
     }
 
-    private async Task<string> ApplyWorldActionAsync()
+    private bool _fightEnabled,_fightPingBusy;
+    private int _fightPid;
+    private async Task<string> ToggleFightAsync()
     {
         if(IsBusy)return "Please wait for the current update.";
         _worldActionChanging=true;
         var games=Process.GetProcessesByName("SplinterCell");
         try {
             if(games.Length!=1)throw new InvalidOperationException("Start one copy of Splinter Cell and load a mission.");
-            return MenuStatus.Text=await DirectLevelLoader.FightGuardsAsync(games[0]);
+            var enabled=!_fightEnabled;
+            var reply=await DirectLevelLoader.FightGuardsAsync(games[0],enabled);
+            _fightEnabled=enabled;_fightPid=enabled?games[0].Id:0;
+            return MenuStatus.Text=reply;
         }
         catch(Exception ex) when(ex is InvalidOperationException or System.ComponentModel.Win32Exception or System.IO.IOException){return MenuStatus.Text=ex.Message;}
         finally{foreach(var game in games)game.Dispose();_worldActionChanging=false;}
+    }
+
+    private async Task PingFightAsync()
+    {
+        if(!_fightEnabled||_fightPingBusy||IsBusy||_shutdownRunning)return;
+        _fightPingBusy=true;
+        try
+        {
+            using var game=Process.GetProcessById(_fightPid);
+            _fightEnabled=await DirectLevelLoader.PingFightAsync(game)=="FIGHT:ON";
+        }
+        catch(ArgumentException){_fightEnabled=false;}
+        catch(InvalidOperationException){_fightEnabled=false;}
+        catch(System.ComponentModel.Win32Exception){_fightEnabled=false;}
+        catch(System.IO.IOException){_fightEnabled=false;}
+        finally{_fightPingBusy=false;}
     }
 
     private GameMenuFrame ReadUtilityMenu()
@@ -637,7 +664,7 @@ public partial class MainWindow : Window
         { LevelStatus.Text = ex.Message; }
         finally { TestConnectionButton.IsEnabled = true; foreach (var game in games) game.Dispose(); }
     }
-    private async void Timer_Tick(object? sender, EventArgs e) { RefreshGameStatus(); RefreshHealthStatus(); await RefreshCheatStatusAsync(); await _overlayNpcs.PingFreezeAsync(); }
+    private async void Timer_Tick(object? sender, EventArgs e) { RefreshGameStatus(); RefreshHealthStatus(); await RefreshCheatStatusAsync(); await PingFightAsync(); await _overlayNpcs.PingFreezeAsync(); }
     private void Refresh_Click(object sender, RoutedEventArgs e) => RefreshGameStatus();
 
     private void RefreshGameStatus()

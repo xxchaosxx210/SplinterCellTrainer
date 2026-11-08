@@ -385,6 +385,15 @@ Check(await objectivePending=="Completed objective: TEST"&&!missions.Busy&&missi
 var failedMission=new MissionsOverlayMenu(missionLevels,()=>throw new InvalidOperationException("Unavailable"),()=>true);
 await Reject(()=>failedMission.ActivateAsync("objective-next"),"completion failure is surfaced");Check(!failedMission.Busy,"failed completion clears busy state for retry");
 
+var fightingOn=false;var fightToggleCalls=0;var fightAvailable=true;
+using var fightMenu=new NpcOverlayMenu();
+fightMenu.ConfigureEsp(()=>false,()=>"",()=>fightAvailable);
+fightMenu.ConfigureFight(()=>fightingOn,()=>{fightingOn=!fightingOn;++fightToggleCalls;return Task.FromResult("Updated");});
+Check(fightMenu.Frame.Entries.Any(e=>e.Key=="npc-fight"&&!e.On),"NPC Manager exposes the combat toggle initially off");
+await fightMenu.ActivateAsync("npc-fight");Check(fightingOn&&fightMenu.Frame.Entries.First(e=>e.Key=="npc-fight").On,"combat toggle invokes enable and reflects active state");
+await fightMenu.ActivateAsync("npc-fight");Check(!fightingOn&&fightToggleCalls==2,"combat toggle invokes disable on the second activation");
+fightAvailable=false;await fightMenu.ActivateAsync("npc-fight");Check(fightToggleCalls==2,"combat toggle cannot change state during another trainer update");
+
 namespace SCTrainer {
  internal sealed record GameMenuEntry(string Label,bool On,bool Available,string Key,string? Value=null,bool Toggle=true,bool Navigation=false,GameMenuInput? Input=null);
  internal sealed record GameMenuFrame(string Key,string Title,GameMenuEntry[] Entries);

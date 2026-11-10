@@ -68,7 +68,13 @@ static bool IsA(Byte* p,const wchar_t* wanted) {
     }
     return false;
 }
+static bool EngineIsExiting() {
+    static const int* requested=reinterpret_cast<const int*>(GetProcAddress(
+        GetModuleHandleW(L"Core.dll"),"?GIsRequestingExit@@3HA"));
+    return requested&&*requested;
+}
 static bool Current() {
+    if(EngineIsExiting())return false;
     return window && IsWindow(window) && Alive(player,playerIndex) && Alive(viewport) &&
         reinterpret_cast<Byte*>(U(viewport,0x34))==player && Alive(pawn) &&
         reinterpret_cast<Byte*>(U(player,fields[0].offset))==pawn;
@@ -137,6 +143,11 @@ static void Restore(DWORD groups) {
     }
 }
 static void Stop(bool restore) {
+    if(EngineIsExiting()){
+        activeMask=0;
+        if(timer&&window)KillTimer(window,timer);
+        timer=0;return;
+    }
     PerceptionRestore();
     NoiseRestore();
     if(restore)Restore(32767);
@@ -225,6 +236,7 @@ static void FindGuards() {
 #include "InvisibleSam.h"
 
 static void Tick() {
+    if(EngineIsExiting()){Stop(false);return;}
     if(!Current()||GetTickCount64()-heartbeat>15000){Stop(true);return;}
     if(activeMask&BypassLocks)LockTick();
     if(activeMask&QuietLights)QuietTick();
